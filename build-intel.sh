@@ -10,7 +10,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 GAME_ZIP="${1:-$HOME/Downloads/NTSD2.8.3.3.zip}"
-REVISION=6   # bump when the wrapper changes, so existing installs re-run setup
+REVISION=7   # bump when the wrapper changes, so existing installs re-run setup
 
 WINE_VERSION=11.0_1
 WINE_URL="https://github.com/Gcenx/macOS_Wine_builds/releases/download/${WINE_VERSION}/wine-stable-${WINE_VERSION}-osx64.tar.xz"
@@ -53,6 +53,9 @@ RES="$APP/Contents/Resources"
 step "Wine"
 tar -xJf "$CACHE/wine-${WINE_VERSION}.tar.xz" -C "$WORK" "Wine Stable.app/Contents/Resources/wine"
 mv "$WORK/Wine Stable.app/Contents/Resources/wine" "$RES/wine"
+step "Rosetta-safe Wine CPU bridge"
+"$ROOT/tools/build-rosetta-bridge.sh" "$RES/wine" "$CACHE/ntsd-rosetta-bridge"
+cp "$CACHE/ntsd-rosetta-bridge/wow64cpu.dll" "$RES/wine/lib/wine/x86_64-windows/"
 # Mono and Gecko are only needed by .NET apps and the built-in browser.
 rm -rf "$RES/wine/share/wine/mono" "$RES/wine/share/wine/gecko"
 # Let winegstreamer find the GStreamer copy inside the bundle.
@@ -87,6 +90,7 @@ cp "$FIXES/ddraw.dll" "$FIXES/dsound.dll" "$FIXES/dsoal-aldrv.dll" "$RES/game/"
 cp "$FIXES/audio-probe" "$FIXES/audio-probe.exe" "$FIXES/audio-config.exe" "$RES/"
 
 mkdir -p "$RES/licenses"
+cp "$CACHE/ntsd-rosetta-bridge/Wine-COPYING.LIB" "$CACHE/ntsd-rosetta-bridge/ROSETTA-SOURCES.txt" "$RES/licenses/"
 cp -R "$FIXES/audio-licenses" "$FIXES/toolchain-licenses" "$RES/licenses/"
 cp "$FIXES/MinHook-LICENSE.txt" "$FIXES/WINDOWS-SOURCES.txt" "$RES/licenses/"
 

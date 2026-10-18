@@ -6,14 +6,12 @@ previous release downloads remain available.
 | Download | Host runtime | Requirements |
 | --- | --- | --- |
 | `NTSD-2.8.3.3-FEX-macOS.dmg` | ARM64 Wine 11.18 + FEX, based on Hadron 0.3.1 | Apple Silicon, macOS 27+; no Rosetta |
-| `NTSD-2.8.3.3-Rosetta-macOS.dmg` | Intel Wine 11.0_1 | macOS 11+; Rosetta on Apple Silicon |
+| `NTSD-2.8.3.3-Rosetta-macOS.dmg` | Intel Wine 11.0_1 + Rosetta bridge fix | macOS 11+; Rosetta on Apple Silicon |
 
-[Download both builds](https://github.com/wowlocal/ntsd-2.8-wine/releases/tag/v2.8.3.3.6).
-The FEX build has passed complete gameplay tests on this Mac. The Rosetta build
-is retained as a fallback; its audio and display integration probes pass, but
-controlled Rosetta runs hit a startup exception on this macOS 27 test host.
-Use FEX on this Mac. Rosetta is retained for other macOS configurations;
-this update does not claim completed Rosetta gameplay here. See [TESTING.md](TESTING.md).
+[Download both builds](https://github.com/wowlocal/ntsd-2.8-wine/releases/tag/v2.8.3.3.7).
+Both builds have completed original-game matches on the M4 Pro / macOS 27.0.1
+test host. Revision 7 fixes the Rosetta startup crash in Wine's 32/64-bit CPU
+bridge. See [the fix](docs/ROSETTA_CRASH_FIX.md) and [validation](TESTING.md).
 
 FEX translates the original game's x86 instructions. This is a Rosetta-free
 runtime, not a source port of the game engine. Steam, Hadron and Homebrew are
@@ -64,7 +62,8 @@ the matching named DMG. `NO_DMG=1` skips the image. `NTSD_RUNTIME=fex|rosetta`
 are aliases for `arm64|intel` in build.sh.
 
 Downloads and source revisions are pinned. The shared display DLL, MinHook,
-DirectSound fallback and audio helpers build for both targets; the Intel build
+DirectSound fallback and audio helpers build for both targets. The Intel target
+also rebuilds Wine’s CPU bridge with Rosetta-safe mode transitions; it
 does not build or depend on FEX. `NTSD_BUILD_DIR`, `NTSD_CACHE_DIR`,
 `NTSD_BUILD_JOBS` (default 2) and `NTSD_LLVM_MINGW` select output/cache/toolchain
 locations. CMake/Ninja are installed into a build-only Python environment when
@@ -114,5 +113,5 @@ assessment. Checksums are generated after stapling.
 
 Hadron's provisioned Wine loader keeps its vendor signature and provisioning
 profile. Do not sign it with `codesign --deep`. Component licenses, source pins,
-and downstream patches accompany the app; corresponding DSOAL/OpenAL and
+and downstream patches accompany the app; corresponding Wine, DSOAL/OpenAL and
 MinHook sources and build helpers accompany the release.

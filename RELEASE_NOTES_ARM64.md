@@ -1,4 +1,4 @@
-# NTSD 2.8.3.3.6 — Rosetta-free FEX preview
+# NTSD 2.8.3.3.7 — Rosetta-free FEX preview
 
 Apple Silicon, macOS 27+. Download **NTSD-2.8.3.3-FEX-macOS.dmg**, copy
 **NTSD FEX.app** to Applications and open it. The app and DMG are Developer ID

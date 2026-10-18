@@ -1,0 +1,36 @@
+{
+  "frames": 1818,
+  "intervals": 1817,
+  "duration_s": 59.961,
+  "average_fps": 30.303030303030305,
+  "mean_ms": 33,
+  "p50_ms": 32.0,
+  "p95_ms": 40.0,
+  "p99_ms": 41.0,
+  "max_ms": 52,
+  "over50": 1,
+  "over100": 0,
+  "timestamp_resolution_ms": 1,
+  "dst": "0x11010085",
+  "start_s": 156742.817,
+  "end_s": 156802.778,
+  "source": "rosetta-fullscreen-v7-trace.log (private raw trace)",
+  "wrapper_version": "2.8.3.3.7",
+  "workload": "idle two-human Naruto/Sasuke, no AI, Wharf, Jounin, normal defense",
+  "music": "Main Theme",
+  "audio": "system",
+  "window_mode": "fullscreen",
+  "client_pixels": [
+    6016,
+    3384
+  ],
+  "viewport_pixels": [
+    6016,
+    3295
+  ],
+  "logical_canvas_pixels": [
+    1333,
+    730
+  ],
+  "retina": true
+}

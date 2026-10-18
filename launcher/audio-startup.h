@@ -8,13 +8,16 @@ static int PrepareAudio(void) {
     env[@"WINEDLLOVERRIDES"] = @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=b";
     int result;
     if (!silentAudio) {
-        result = RunWindowsAudioTool(@"audio-config.exe", @[@"system"], env, 8.0);
+        // A cold Wine/FEX process can spend more than eight seconds starting
+        // prefix services before this registry/COM configuration tool runs.
+        // Device probes keep their shorter deadlines; configuration gets 30s.
+        result = RunWindowsAudioTool(@"audio-config.exe", @[@"system"], env, 30.0);
         if (result != 0) return result;
         silentAudio = RunAudioTool(Res(@"audio-probe"), @[], nil, 9.0) != 0;
         if (!silentAudio)
             silentAudio = RunWindowsAudioTool(@"audio-probe.exe", @[], env, 8.0) != 0;
     }
     if (silentAudio)
-        return RunWindowsAudioTool(@"audio-config.exe", @[@"silent"], env, 8.0);
+        return RunWindowsAudioTool(@"audio-config.exe", @[@"silent"], env, 30.0);
     return 0;
 }

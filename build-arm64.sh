@@ -10,7 +10,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 GAME_ZIP="${1:-$HOME/Downloads/NTSD2.8.3.3.zip}"
-REVISION=6   # bump when the wrapper changes, so existing installs re-run setup
+REVISION=7   # bump when the wrapper changes, so existing installs re-run setup
 
 HADRON_VERSION=0.3.1
 HADRON_URL="https://github.com/Broyojo/hadron/releases/download/v${HADRON_VERSION}/Hadron-${HADRON_VERSION}.dmg"

@@ -5,6 +5,12 @@ Wine 11.0 — https://www.winehq.org
   macOS build: https://github.com/Gcenx/macOS_Wine_builds (release 11.0_1)
   Wine Mono and Wine Gecko were removed from the bundle; an extra rpath was
   added to lib/wine/x86_64-unix/winegstreamer.so so it loads the bundled GStreamer.
+  wow64cpu.dll is rebuilt from Gcenx/wine commit
+  db11d0fe6a169c457e23d007e20404643d067aa8 with Rosetta-safe far-call/return
+  mode transitions. The trampoline design follows tsukasa-art/swingby-wine
+  commit 9c9d68d4d0b2fbf25117d9d2e737b5a9f43561ee (LGPL-2.1-or-later).
+  Full corresponding Wine source, patch and build helper accompany the release.
+  See licenses/ROSETTA-SOURCES.txt and licenses/Wine-COPYING.LIB.
 
 GStreamer 1.28.6 — https://gstreamer.freedesktop.org
   License: GNU LGPL 2.1 or later (core and the bundled plugins, including mpg123).

@@ -1,3 +1,39 @@
+# Revision 7 crash fix — 19 October 2026
+
+Wrapper **2.8.3.3.7**, Apple M4 Pro / 24 GB / macOS 27.0.1 (26A434).
+
+The Rosetta app installed in Applications completed Naruto versus Sasuke AI on
+Wharf to the scoreboard at **01:11**: P1 lost (0 damage, 510 HP lost); AI won
+(510 damage, 0 HP lost). Menu input, movement, jump, attack and a fullscreen
+round trip to 6016×3384 and back to 1333×730 worked with system audio selected.
+The game executable remains unchanged. The Wine bridge fix and exception trace
+are described in [docs/ROSETTA_CRASH_FIX.md](docs/ROSETTA_CRASH_FIX.md).
+
+A four-thread exception/context-resume guard passed all 2,000 resumptions with
+zero failures. This guard also passes on the original runtime; the original
+game is the reproducer for the repaired crash. Fresh Rosetta Winsock probes
+pass DNS, outbound TCP/UDP and inbound TCP, and the host samples as X86-64
+(translated). The app has no App Sandbox or microphone-input entitlement.
+
+Both revision 7 wrappers also completed 60-second idle two-human fullscreen
+captures at 6016×3384 with fixed Main Theme music and system audio. Both maintained
+30.30 submissions/s; p99 was 44 ms for FEX and 41 ms for Rosetta. Raw data, the
+plot and limits are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+Rosetta's real game window also tiled to 3008×3198 and returned to its complete
+windowed view. Fullscreen and native resize transitions continued rendering.
+
+An installed FEX launch exposed an eight-second timeout while configuring
+Wine audio before the device probes. Configuration now gets a bounded 30-second
+startup budget, while the DirectSound device probe keeps its eight-second
+recovery deadline. The updated installed app reached its menu with system audio
+and all output probes successful. Frame captures preceded only this startup
+budget adjustment; the game, display support and CPU runtimes are unchanged.
+
+The earlier revision 6 failure and its receipts below are historical evidence.
+
+---
+
 # Dual-runtime update validation — 18–19 October 2026
 
 Wrapper **2.8.3.3.6**, Apple M4 Pro / 24 GB / macOS 27.0.1 (26A434).

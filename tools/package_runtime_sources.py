@@ -59,8 +59,23 @@ with tarfile.open(temporary, 'w:xz') as archive:
                 archive.addfile(metadata(member), stream)
     for name in ['patches', 'launcher', 'tools/build-runtime-fixes.sh',
                  'tools/package_runtime_sources.py', 'tools/build-windows-support.sh',
-                 'tools/runtime-build-common.sh', 'vendor/minhook']:
+                 'tools/runtime-build-common.sh', 'tools/build-rosetta-bridge.sh', 'vendor/minhook']:
         archive.add(root / name, arcname=f'{prefix}/{name}', filter=metadata)
+    rosetta_sources = cache / 'ntsd-rosetta-bridge/ROSETTA-SOURCES.txt'
+    if rosetta_sources.exists():
+        wine_commit = re.search(r'^Wine Gcenx/wine ([0-9a-f]{40})', rosetta_sources.read_text(), re.M).group(1)
+        wine_archive = cache / f'wine-source-{wine_commit}.tar.gz'
+        expected = re.search(r'^Source archive SHA256 ([0-9a-f]{64})', rosetta_sources.read_text(), re.M).group(1)
+        assert hashlib.sha256(wine_archive.read_bytes()).hexdigest() == expected
+        with tarfile.open(wine_archive, 'r:gz') as upstream:
+            for member in upstream:
+                path = Path(member.name)
+                assert not path.is_absolute() and '..' not in path.parts
+                relative = Path(*path.parts[1:])
+                stream = upstream.extractfile(member) if member.isfile() else None
+                member.name = f'{prefix}/Wine/{relative}'
+                archive.addfile(metadata(member), stream)
+        add_text(archive, 'ROSETTA-SOURCES.txt', rosetta_sources.read_text())
     if (cache / 'ntsd-runtime-fixes/FEX-LICENSE').exists():
         archive.add(cache / 'ntsd-runtime-fixes/FEX-LICENSE',
                     arcname=f'{prefix}/FEX-LICENSE', filter=metadata)
@@ -72,6 +87,9 @@ with tarfile.open(temporary, 'w:xz') as archive:
              'tools/build-runtime-fixes.sh records the pinned compiler, source commits and flags. '
              'It also rebuilds the MIT-licensed FEX WoW64 translator from its pinned public '
              'source with the included patches.\n\n'
+             'When ROSETTA-SOURCES.txt is present, Wine/ contains the complete pinned Wine '
+             'source. Apply patches/wine-rosetta-mode-switch.patch and rebuild its CPU module '
+             'with tools/build-rosetta-bridge.sh and the retained Wine runtime.\n\n'
              'Full wrapper: https://github.com/wowlocal/ntsd-2.8-wine\n'
              'No game archive, Wine prefix or signing credentials are included.\n')
 temporary.replace(output)

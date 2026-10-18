@@ -116,9 +116,6 @@ static NSDictionary<NSString *, NSString *> *WineEnvironment(BOOL forSetup) {
     env[@"GST_PLUGIN_SCANNER"] = [gst stringByAppendingPathComponent:@"libexec/gstreamer-1.0/gst-plugin-scanner"];
     env[@"GST_REGISTRY"] = [SupportDir() stringByAppendingPathComponent:@"gstreamer-registry.bin"];
     [env removeObjectForKey:@"GST_PLUGIN_PATH"];
-    // Makes Wine's process register with the Dock as this bundle (name + icon)
-    // instead of as a bare "wine" binary.
-    if (!forSetup) env[@"CFProcessPath"] = [GameBundlePath() stringByAppendingPathComponent:@"Contents/MacOS/wine"];
     return env;
 }
 
@@ -142,7 +139,11 @@ static int SpawnGame(pid_t *pid) {
     posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, LogFile().fileSystemRepresentation,
                                      O_WRONLY | O_CREAT | O_APPEND, 0644);
     posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
-    char **env = EnvironmentBlock(WineEnvironment(NO));
+    // Only the game owns this identity. Audio tools may start Wine's background
+    // explorer process; sharing the identity makes Dock/AX select that helper.
+    NSMutableDictionary *gameEnv = [WineEnvironment(NO) mutableCopy];
+    gameEnv[@"CFProcessPath"] = [GameBundlePath() stringByAppendingPathComponent:@"Contents/MacOS/wine"];
+    char **env = EnvironmentBlock(gameEnv);
     int rc = posix_spawn(pid, wine, &actions, NULL, argv, env);
     for (char **entry = env; *entry; entry++) free(*entry);
     free(env);
