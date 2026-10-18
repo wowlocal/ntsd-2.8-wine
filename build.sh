@@ -4,12 +4,13 @@
 #
 #   ./build.sh [path/to/NTSD<version>.zip]
 #
-# NO_DMG=1 skips the disk image.
+# NO_DMG=1 skips the disk image. SIGN_IDENTITY picks the signing identity
+# (default "-", ad-hoc); release.sh passes a Developer ID one.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 GAME_ZIP="${1:-$HOME/Downloads/NTSD2.8.3.3.zip}"
-REVISION=1   # bump when the wrapper changes, so existing installs re-run setup
+REVISION=2   # bump when the wrapper changes, so existing installs re-run setup
 
 WINE_VERSION=11.0_1
 WINE_URL="https://github.com/Gcenx/macOS_Wine_builds/releases/download/${WINE_VERSION}/wine-stable-${WINE_VERSION}-osx64.tar.xz"
@@ -56,7 +57,6 @@ rm -rf "$RES/wine/share/wine/mono" "$RES/wine/share/wine/gecko"
 # Let winegstreamer find the GStreamer copy inside the bundle.
 WGST="$RES/wine/lib/wine/x86_64-unix/winegstreamer.so"
 install_name_tool -add_rpath @loader_path/../../../../gstreamer/lib "$WGST" 2>/dev/null
-codesign --force --sign - "$WGST"
 
 step "GStreamer (only what Wine needs for audio)"
 pkgutil --expand-full "$CACHE/gstreamer-${GST_VERSION}.pkg" "$WORK/gstpkg"
@@ -70,6 +70,14 @@ python3 "$ROOT/tools/gst_subset.py" "$WORK/gst" "$RES/gstreamer"
 step "Game: $GAME_TOP"
 unzip -q "$GAME_ZIP" -d "$WORK/game"
 mv "$WORK/game/$GAME_TOP" "$RES/game"
+# Default keys put attack/jump/defend for players 1 and 2 on the numeric
+# keypad (Windows VK 100-102 / 97-99), which most Macs don't have. Use J/K/L
+# for player 1, as in the original LF2, and , . / next to the arrows for player 2.
+CONTROLS="$RES/game/data/control.txt"
+grep -q '^0 87 83 65 68 100 101 102 ' "$CONTROLS" && grep -q '^0 38 40 37 39 97 98 99 ' "$CONTROLS" \
+    || { echo "unexpected data/control.txt layout, update the key patch" >&2; exit 1; }
+sed -i '' -e '1s/^0 87 83 65 68 100 101 102 /0 87 83 65 68 74 75 76 /' \
+          -e '2s/^0 38 40 37 39 97 98 99 /0 38 40 37 39 188 190 191 /' "$CONTROLS"
 
 step "Launcher"
 clang -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -fobjc-arc -O2 -Wall \
@@ -80,12 +88,25 @@ sed -e "s/@GAME_VERSION@/$GAME_VERSION/g" -e "s/@BUILD_VERSION@/$BUILD_VERSION/g
     "$ROOT/launcher/Info.plist" > "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp "$ROOT/assets/AppIcon.icns" "$RES/AppIcon.icns"
-cp -R "$ROOT/launcher/ru.lproj" "$RES/"
 cp "$ROOT/THIRD_PARTY_NOTICES.txt" "$RES/"
 
-step "Signing (ad-hoc)"
+IDENTITY="${SIGN_IDENTITY:--}"
+step "Signing ($IDENTITY)"
+# Hardened runtime on every Mach-O, also for local ad-hoc builds: without the
+# audio-input entitlement macOS then denies Wine's microphone probe silently
+# instead of asking the player. Wine's executables get the exceptions it needs.
+sign() {  # path [entitlements]
+    codesign --force --sign "$IDENTITY" --options runtime \
+        $([[ "$IDENTITY" == "-" ]] || echo --timestamp) ${2:+--entitlements "$2"} "$1"
+}
 xattr -cr "$APP"
-codesign --force --sign - "$APP"
+while IFS= read -r -d '' file; do
+    kind="$(file -b "$file")"
+    [[ "$kind" == *Mach-O* ]] || continue
+    if [[ "$kind" == *executable* ]]; then sign "$file" "$ROOT/launcher/wine.entitlements"; else sign "$file"; fi
+done < <(find "$RES" -type f -print0)
+sign "$APP"
+codesign --verify --deep --strict "$APP"
 du -sh "$APP"
 
 if [[ -z "${NO_DMG:-}" ]]; then

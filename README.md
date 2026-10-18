@@ -22,6 +22,10 @@ Wine и GStreamer скачиваются в `.cache/` и проверяются 
 
 ## Как это работает
 
+- **Управление по умолчанию:** игрок 1 — WASD + J/K/L (атака/прыжок/защита),
+  игрок 2 — стрелки + `,` `.` `/`. В оригинальном `data/control.txt` действия
+  висят на цифровом блоке, `build.sh` это исправляет. Если игрок менял клавиши
+  сам, обновление приложения их сохраняет.
 - **Первый запуск** (~20–30 с, с окном прогресса): игра копируется
   в `~/Library/Application Support/NTSD/Game`, создаётся Wine-префикс в `…/NTSD/Prefix`.
   На Mac с Apple silicon при отсутствии Rosetta 2 приложение предложит её установить.
@@ -41,21 +45,22 @@ Wine и GStreamer скачиваются в `.cache/` и проверяются 
 ./release.sh ~/Downloads/NTSD2.8.3.3.zip --publish
 ```
 
-Скрипт собирает приложение, подписывает каждый Mach-O внутри
-(Developer ID, hardened runtime, `launcher/wine.entitlements` для исполняемых
-файлов Wine), нотаризует и степлит `.app` и `.dmg`, проверяет их через
+Скрипт собирает приложение с подписью Developer ID (`build.sh` подписывает
+каждый Mach-O с hardened runtime, исполняемым файлам Wine добавляет
+`launcher/wine.entitlements`), нотаризует и степлит `.app` и `.dmg`, проверяет их через
 `spctl` и с `--publish` выкладывает DMG в GitHub Releases.
 
 Нужно:
 - сертификат «Developer ID Application» в связке ключей;
-- профиль notarytool (`NOTARY_KEYCHAIN_PROFILE`, по умолчанию `NotaryProfile`):
+- профиль notarytool (`NOTARY_KEYCHAIN_PROFILE`, по умолчанию `keys-cli-notary`):
   ```sh
-  xcrun notarytool store-credentials NotaryProfile --apple-id <apple-id> --team-id <team-id>
+  xcrun notarytool store-credentials keys-cli-notary --apple-id <apple-id> --team-id <team-id>
   ```
 
-Release-сборка не запрашивает микрофон: под hardened runtime без entitlement
-`audio-input` macOS молча отказывает Wine в доступе. Локальная ad-hoc сборка
-(`build.sh`) спрашивает один раз — смело отвечайте «Не разрешать».
+Микрофон приложение не запрашивает. Все бинарники, в том числе в локальной
+ad-hoc сборке, подписаны с hardened runtime без entitlement `audio-input`,
+поэтому macOS молча отказывает Wine, когда тот при инициализации звука
+опрашивает устройства ввода.
 
 Локальная ad-hoc сборка не нотаризована: на другом Mac её придётся открыть
 через System Settings → Privacy & Security → «Open Anyway».

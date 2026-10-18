@@ -269,9 +269,18 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     }
 
     [self setStatus:T(@"Копирую файлы игры…", @"Copying game files…")];
+    // Key bindings the player changed since the last setup survive the refresh;
+    // untouched ones pick up the new bundled defaults.
+    NSString *controls = [GameDir() stringByAppendingPathComponent:@"data/control.txt"];
+    NSDate *changed = [fm attributesOfItemAtPath:controls error:nil].fileModificationDate;
+    NSDate *setUp = [fm attributesOfItemAtPath:StampFile() error:nil].fileModificationDate;
+    NSData *playerControls = (changed && setUp && [changed compare:setUp] == NSOrderedDescending)
+                                 ? [NSData dataWithContentsOfFile:controls] : nil;
+
     // ditto merges: bundled files are refreshed, the player's own files stay.
     if (RunTool(@"/usr/bin/ditto", @[Res(@"game"), GameDir()], nil) != 0)
         return T(@"Не удалось скопировать файлы игры.", @"Couldn't copy the game files.");
+    [playerControls writeToFile:controls atomically:YES];
 
     [self setStatus:T(@"Настраиваю Wine…", @"Setting up Wine…")];
     NSDictionary *env = WineEnvironment(YES);

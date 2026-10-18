@@ -5,7 +5,7 @@
 #
 # --publish also creates a GitHub release with the dmg (needs `gh`).
 # Env: CODESIGN_IDENTITY (default: first "Developer ID Application" identity),
-#      NOTARY_KEYCHAIN_PROFILE (default: NotaryProfile, see
+#      NOTARY_KEYCHAIN_PROFILE (default: keys-cli-notary, see
 #      `xcrun notarytool store-credentials`).
 set -euo pipefail
 
@@ -16,7 +16,7 @@ for arg in "$@"; do
     if [[ "$arg" == "--publish" ]]; then PUBLISH=1; else ARGS+=("$arg"); fi
 done
 
-PROFILE="${NOTARY_KEYCHAIN_PROFILE:-NotaryProfile}"
+PROFILE="${NOTARY_KEYCHAIN_PROFILE:-keys-cli-notary}"
 IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' | head -1)}"
 [[ -n "$IDENTITY" ]] || { echo "no Developer ID Application identity found" >&2; exit 1; }
 xcrun notarytool history -p "$PROFILE" >/dev/null \
@@ -24,34 +24,15 @@ xcrun notarytool history -p "$PROFILE" >/dev/null \
 
 step() { printf '\n==> %s\n' "$*"; }
 
-sign() {  # path [entitlements]
-    codesign --force --sign "$IDENTITY" --options runtime --timestamp ${2:+--entitlements "$2"} "$1"
-}
-
 notarize() {  # file
     xcrun notarytool submit -p "$PROFILE" "$1" --wait --timeout 1h
 }
 
-NO_DMG=1 "$ROOT/build.sh" "${ARGS[@]+"${ARGS[@]}"}"
+SIGN_IDENTITY="$IDENTITY" NO_DMG=1 "$ROOT/build.sh" "${ARGS[@]+"${ARGS[@]}"}"
 APP="$ROOT/build/NTSD.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
 DMG="$ROOT/build/NTSD-${VERSION}-macOS.dmg"
-
-step "Signing with $IDENTITY"
-# Every Mach-O inside Resources (Wine, GStreamer) must carry a Developer ID
-# signature with hardened runtime; executables get Wine's entitlements.
-while IFS= read -r -d '' file; do
-    kind="$(file -b "$file")"
-    [[ "$kind" == *Mach-O* ]] || continue
-    if [[ "$kind" == *executable* ]]; then
-        sign "$file" "$ROOT/launcher/wine.entitlements"
-    else
-        sign "$file"
-    fi
-done < <(find "$APP/Contents/Resources" -type f -print0)
-sign "$APP"
-codesign --verify --deep --strict --verbose=2 "$APP"
 
 step "Notarizing the app"
 ditto -c -k --keepParent "$APP" "$ROOT/build/NTSD.zip"
