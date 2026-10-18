@@ -1,72 +1,92 @@
 # NTSD for macOS
 
-Собирает `NTSD.app` — самодостаточное приложение для macOS с игрой
-Naruto: The Setting Dawn внутри. Ставить Wine, Homebrew или что-то ещё
-в систему не нужно. Используется только open source: Wine 11
-([Gcenx/macOS_Wine_builds](https://github.com/Gcenx/macOS_Wine_builds)) и GStreamer.
+The ARM64 Wine/FEX build is **experimental**: the bundle and networking checks
+pass, but NTSD 2.8.3.3 currently fails during startup. See [TESTING.md](TESTING.md).
+The established Intel build remains the default; it requires Rosetta on Apple
+Silicon. Select `NTSD_RUNTIME=arm64` explicitly to build without Rosetta.
 
-## Сборка
+The ARM64 target builds a self-contained `NTSD.app` for **Apple Silicon and macOS 27 or later**.
+The host runtime is native ARM64 Wine with FEX, from
+[Hadron 0.3.1](https://github.com/Broyojo/hadron/releases/tag/v0.3.1).
+It does not install or use Rosetta. The original Windows game's x86 instructions
+are translated by FEX; this is not a native source port of the game engine.
+
+## Build
 
 ```sh
+NTSD_RUNTIME=arm64 ./build.sh ~/Downloads/NTSD2.8.3.3.zip
+```
+
+Requires Xcode Command Line Tools and Python 3. Hadron is downloaded from its
+release and checked against a pinned SHA-256. Wine, FEX, graphics libraries,
+GStreamer and component licences are bundled; Hadron, Steam and Homebrew do not
+need to be installed on the player's Mac.
+
+Outputs:
+
+- `build/NTSD.app`
+- `build/NTSD-2.8.3.3-arm64-experimental-macOS.dmg` (`NO_DMG=1` skips the image)
+
+Use `NTSD_BUILD_DIR` and `NTSD_CACHE_DIR` for build outputs and downloads on
+another volume. Temporary staging stays inside the build directory. For example:
+
+```sh
+NTSD_BUILD_DIR=/Volumes/NTSD-Builds/tasks/ntsd-arm64/build \
+NTSD_CACHE_DIR=/Volumes/NTSD-Builds/tasks/ntsd-arm64/cache \
+NTSD_RUNTIME=arm64 \
 ./build.sh ~/Downloads/NTSD2.8.3.3.zip
 ```
 
-Результат:
-- `build/NTSD.app` — приложение;
-- `build/NTSD-<версия>-macOS.dmg` — образ для раздачи (`NO_DMG=1` пропускает его).
+## Running
 
-Wine и GStreamer скачиваются в `.cache/` и проверяются по SHA-256.
-Нужны Xcode Command Line Tools (`clang`, `codesign`) и `python3`.
-Иконка уже лежит в `assets/`. Перегенерировать её: `tools/make_icon.py`
-(нужны numpy, Pillow и scipy).
+First launch copies the game to `~/Library/Application Support/NTSD/Game` and
+creates a fresh `Prefix-arm64`. The previous Intel `Prefix` is left in place.
+Existing custom controls and extra game files are preserved. Player 1 defaults
+to WASD + J/K/L; player 2 uses arrows + `,` `.` `/`.
 
-## Как это работает
+Hold Option while opening the app to open the game folder or reset ARM64 Wine.
+The main log is `~/Library/Application Support/NTSD/Logs/NTSD.log`; runtime and
+memory-watchdog logs are in `NTSD/ARM64/logs`. GStreamer caches stay under
+`NTSD/ARM64/cache`.
 
-- **Управление по умолчанию:** игрок 1 — WASD + J/K/L (атака/прыжок/защита),
-  игрок 2 — стрелки + `,` `.` `/`. В оригинальном `data/control.txt` действия
-  висят на цифровом блоке, `build.sh` это исправляет. Если игрок менял клавиши
-  сам, обновление приложения их сохраняет.
-- **Первый запуск** (~20–30 с, с окном прогресса): игра копируется
-  в `~/Library/Application Support/NTSD/Game`, создаётся Wine-префикс в `…/NTSD/Prefix`.
-  На Mac с Apple silicon при отсутствии Rosetta 2 приложение предложит её установить.
-- **Следующие запуски** — игра открывается сразу.
-- **Option при запуске** — меню: открыть папку игры (моды, `data.txt`, записи боёв)
-  или сбросить Wine.
-- **Журнал:** `~/Library/Logs/NTSD.log`.
-- Музыка игры — WMA/ASF. Её играет урезанный GStreamer внутри бандла
-  (`Contents/Resources/gstreamer`, плагины `asf` + `libav`).
-- В Dock игра отображается как «NTSD» со своей иконкой: процессу Wine
-  передаётся `CFProcessPath`, а бандл помечен `LSUIElement`, чтобы служебные
-  процессы Wine не добавляли свои значки.
+The launcher and Wine runtime have **no App Sandbox entitlement**. TCP/UDP
+networking and multiplayer are not disabled by the wrapper. macOS Local Network
+and firewall permissions, when requested, still apply. This does not by itself
+establish compatibility with an Internet server or another player's game.
 
-## Релиз (подпись + нотаризация)
+For isolated verification, `NTSD_SUPPORT_DIR` names an absolute alternative
+support directory. `NTSD_WINEDEBUG` enables Wine diagnostics. The launcher's
+`--prepare-only` option performs first-run setup without opening the game.
+
+## Signing and notarization
 
 ```sh
-./release.sh ~/Downloads/NTSD2.8.3.3.zip --publish
+NTSD_RUNTIME=arm64 ./release.sh ~/Downloads/NTSD2.8.3.3.zip
 ```
 
-Скрипт собирает приложение с подписью Developer ID (`build.sh` подписывает
-каждый Mach-O с hardened runtime, исполняемым файлам Wine добавляет
-`launcher/wine.entitlements`), нотаризует и степлит `.app` и `.dmg`, проверяет их через
-`spctl` и с `--publish` выкладывает DMG в GitHub Releases.
+Uses the installed Developer ID Application identity and the Keychain profile
+`codex-notary`. Override with `CODESIGN_IDENTITY` / `NOTARY_KEYCHAIN_PROFILE`.
+It notarizes and staples the app and DMG, checks Gatekeeper for
+`Notarized Developer ID`, and writes the DMG's SHA-256 **after** stapling.
+`--publish` additionally creates a GitHub Release (a prerelease for ARM64) with
+the DMG and checksum. The ARM64 prototype is not a
+playable release; notarization verifies distribution signatures, not compatibility.
 
-Нужно:
-- сертификат «Developer ID Application» в связке ключей;
-- профиль notarytool (`NOTARY_KEYCHAIN_PROFILE`, по умолчанию `keys-cli-notary`):
-  ```sh
-  xcrun notarytool store-credentials keys-cli-notary --apple-id <apple-id> --team-id <team-id>
-  ```
+Hadron's Wine loader retains its original signature and embedded provisioning
+profile for Apple's cross-architecture entitlement. Do not sign the runtime with
+`codesign --deep`, strip it, or change loader paths with `install_name_tool`.
+The build signs the outer NTSD app separately. All runtime machine code and
+component licences are retained. The recorded shell-script patch relocates
+logs/caches and adds Local Network usage text to the generated game bundle.
 
-Микрофон приложение не запрашивает. Все бинарники, в том числе в локальной
-ad-hoc сборке, подписаны с hardened runtime без entitlement `audio-input`,
-поэтому macOS молча отказывает Wine, когда тот при инициализации звука
-опрашивает устройства ввода.
-
-Локальная ad-hoc сборка не нотаризована: на другом Mac её придётся открыть
-через System Settings → Privacy & Security → «Open Anyway».
-
-## Удаление
+Verify a built bundle with:
 
 ```sh
-rm -rf /Applications/NTSD.app ~/Library/Application\ Support/NTSD ~/Library/Logs/NTSD.log
+python3 tools/verify_bundle.py build/NTSD.app
 ```
+
+This checks every Mach-O for an ARM64 slice, the provisioned loader, FEX,
+GStreamer ASF support, signatures, minimum OS and absence of App Sandbox.
+Runtime test results are recorded in `TESTING.md`. Use `NTSD_RUNTIME=intel` (or
+omit it) for the previous universal launcher and Intel Wine runtime; its original
+launcher, metadata and notices are retained in `launcher/intel-*`.

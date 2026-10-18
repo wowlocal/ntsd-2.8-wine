@@ -1,7 +1,7 @@
 // NTSD launcher.
 //
 // First run: copies the game out of the (read-only) bundle, creates a private
-// Wine prefix and installs Rosetta 2 if it is missing, showing a small
+// ARM64 Wine prefix, showing a small
 // progress window. Later runs start the game straight away, without any UI.
 // The game's Wine process appears in the Dock under this app's name and icon.
 // Hold Option while opening the app for extra actions.
@@ -10,7 +10,6 @@
 #import <CoreGraphics/CoreGraphics.h>
 #include <fcntl.h>
 #include <spawn.h>
-#include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -28,24 +27,20 @@ static NSString *Res(NSString *path) {
 }
 
 static NSString *SupportDir(void) {
+    NSString *override = NSProcessInfo.processInfo.environment[@"NTSD_SUPPORT_DIR"];
+    if (override.length && override.isAbsolutePath) return override;
     NSString *base = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
     return [base stringByAppendingPathComponent:@"NTSD"];
 }
 
-static NSString *PrefixDir(void) { return [SupportDir() stringByAppendingPathComponent:@"Prefix"]; }
+static NSString *PrefixDir(void) { return [SupportDir() stringByAppendingPathComponent:@"Prefix-arm64"]; }
 static NSString *GameDir(void) { return [SupportDir() stringByAppendingPathComponent:@"Game"]; }
-static NSString *StampFile(void) { return [SupportDir() stringByAppendingPathComponent:@".setup-version"]; }
-static NSString *LogFile(void) { return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/NTSD.log"]; }
+static NSString *StampFile(void) { return [SupportDir() stringByAppendingPathComponent:@".setup-version-arm64"]; }
+static NSString *LogFile(void) { return [SupportDir() stringByAppendingPathComponent:@"Logs/NTSD.log"]; }
+static NSString *Wine(NSString *tool) { return Res([@"runtime/dist/bin" stringByAppendingPathComponent:tool]); }
 static NSString *BuildID(void) { return NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"] ?: @"0"; }
 
 #pragma mark - State checks
-
-static BOOL NeedsRosetta(void) {
-    int arm64 = 0;
-    size_t size = sizeof(arm64);
-    if (sysctlbyname("hw.optional.arm64", &arm64, &size, NULL, 0) != 0 || !arm64) return NO;
-    return ![NSFileManager.defaultManager fileExistsAtPath:@"/Library/Apple/usr/libexec/oah/libRosettaRuntime"];
-}
 
 static BOOL NeedsSetup(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -64,20 +59,30 @@ static BOOL OptionKeyDown(void) {
 // forSetup: wineboot runs without the Mac display driver so it can't pop up
 // its own "updating configuration" window over ours.
 static NSDictionary<NSString *, NSString *> *WineEnvironment(BOOL forSetup) {
-    NSMutableDictionary *env = [NSProcessInfo.processInfo.environment mutableCopy];
-    NSString *gst = Res(@"gstreamer");
+    // Only named settings reach Windows processes; do not inherit host secrets,
+    // Intel runtime paths, injected libraries or a caller's Wine prefix.
+    NSDictionary *host = NSProcessInfo.processInfo.environment;
+    NSMutableDictionary *env = [NSMutableDictionary dictionary];
+    for (NSString *key in @[@"HOME", @"USER", @"LOGNAME", @"LANG", @"TMPDIR"]) {
+        if (host[key]) env[key] = host[key];
+    }
+    env[@"PATH"] = @"/usr/bin:/bin:/usr/sbin:/sbin";
+    NSString *gst = Res(@"runtime/dist/gstreamer");
+    env[@"HADRON_SUPPORT"] = [SupportDir() stringByAppendingPathComponent:@"ARM64"];
+    env[@"HADRON_PROGRAM"] = @"1";
+    env[@"HADRON_APP_NAME"] = @"NTSD";
+    env[@"HADRON_D3D9"] = @"wined3d";
+    // This small DirectDraw game needs no persistent translator cache.
+    env[@"FEX_DISKCACHE"] = @"0";
+    env[@"DYLD_FALLBACK_LIBRARY_PATH"] = Res(@"runtime/dist/ext/lib");
     env[@"WINEPREFIX"] = PrefixDir();
-    env[@"WINEDEBUG"] = @"-all";
+    env[@"WINEDEBUG"] = host[@"NTSD_WINEDEBUG"] ?: @"-all";
     env[@"MVK_CONFIG_LOG_LEVEL"] = @"0";
     env[@"WINEDLLOVERRIDES"] = forSetup ? @"mscoree,mshtml=;winemenubuilder.exe=d;winemac.drv=d"
                                         : @"mscoree,mshtml=;winemenubuilder.exe=d";
-    env[@"GST_PLUGIN_SYSTEM_PATH"] = [gst stringByAppendingPathComponent:@"lib/gstreamer-1.0"];
-    env[@"GST_PLUGIN_SCANNER"] = [gst stringByAppendingPathComponent:@"libexec/gstreamer-1.0/gst-plugin-scanner"];
-    env[@"GST_REGISTRY"] = [SupportDir() stringByAppendingPathComponent:@"gstreamer-registry.bin"];
-    [env removeObjectForKey:@"GST_PLUGIN_PATH"];
-    // Makes Wine's process register with the Dock as this bundle (name + icon)
-    // instead of as a bare "wine" binary.
-    if (!forSetup) env[@"CFProcessPath"] = NSBundle.mainBundle.executablePath;
+    env[@"GST_PLUGIN_SYSTEM_PATH_1_0"] = [gst stringByAppendingPathComponent:@"lib/gstreamer-1.0"];
+    env[@"GST_PLUGIN_SCANNER_1_0"] = [gst stringByAppendingPathComponent:@"libexec/gstreamer-1.0/gst-plugin-scanner"];
+    env[@"GST_REGISTRY_1_0"] = [SupportDir() stringByAppendingPathComponent:@"ARM64/cache/gstreamer-registry-0.3.1.bin"];
     return env;
 }
 
@@ -90,26 +95,33 @@ static char **EnvironmentBlock(NSDictionary<NSString *, NSString *> *env) {
     return block;
 }
 
-// Starts the game; `wine NTSD.exe` runs start.exe, which waits for the game.
+// Hadron's play script supplies the FEX/graphics/media environment and watchdog.
 static int SpawnGame(pid_t *pid) {
-    const char *wine = Res(@"wine/bin/wine").fileSystemRepresentation;
-    char *argv[] = {(char *)wine, "NTSD.exe", NULL};
+    const char *runner = Res(@"runtime/scripts/play").fileSystemRepresentation;
+    const char *exe = [GameDir() stringByAppendingPathComponent:@"NTSD.exe"].fileSystemRepresentation;
+    char *argv[] = {(char *)runner, "ntsd", (char *)exe, NULL};
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-    posix_spawn_file_actions_addchdir_np(&actions, GameDir().fileSystemRepresentation);
+    posix_spawn_file_actions_addchdir(&actions, GameDir().fileSystemRepresentation);
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, LogFile().fileSystemRepresentation,
-                                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                                     O_WRONLY | O_CREAT | O_APPEND, 0644);
     posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
-    int rc = posix_spawn(pid, wine, &actions, NULL, argv, EnvironmentBlock(WineEnvironment(NO)));
+    char **env = EnvironmentBlock(WineEnvironment(NO));
+    int rc = posix_spawn(pid, runner, &actions, NULL, argv, env);
+    for (char **entry = env; *entry; entry++) free(*entry);
+    free(env);
     posix_spawn_file_actions_destroy(&actions);
     return rc;
 }
 
-// The game's process registers as this bundle (see CFProcessPath) and Wine
-// switches it to a regular app once its window is up.
+// Hadron's per-game Wine loader bundle switches to a regular app once its
+// window is up. Match its path too, so isolated test installs stay independent.
 static NSRunningApplication *GameApplication(void) {
-    for (NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:NSBundle.mainBundle.bundleIdentifier]) {
+    NSString *bundle = @"com.broyojo.hadron.game.ntsd";
+    NSString *expected = [[SupportDir() stringByAppendingPathComponent:@"ARM64/apps/ntsd/NTSD.app"] stringByResolvingSymlinksInPath];
+    for (NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:bundle]) {
+        if (![[app.bundleURL.path stringByResolvingSymlinksInPath] isEqualToString:expected]) continue;
         if (app.processIdentifier != getpid() && app.activationPolicy == NSApplicationActivationPolicyRegular) return app;
     }
     return nil;
@@ -210,7 +222,7 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
 }
 
 - (void)resetWine {
-    RunTool(Res(@"wine/bin/wineserver"), @[@"-k"], WineEnvironment(YES));
+    RunTool(Wine(@"wineserver"), @[@"-k"], WineEnvironment(YES));
     [NSFileManager.defaultManager removeItemAtPath:PrefixDir() error:nil];
     [NSFileManager.defaultManager removeItemAtPath:StampFile() error:nil];
     [self start];
@@ -223,19 +235,14 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
         [NSApp terminate:nil];
         return;
     }
-    if (!NeedsRosetta() && !NeedsSetup()) {
+    if (!NeedsSetup()) {
         [self launchAndQuit];
         return;
     }
     [self comeForward];
-    BOOL rosetta = NeedsRosetta();
-    if (rosetta && ![self askToInstallRosetta]) {
-        [NSApp terminate:nil];
-        return;
-    }
     [self showWindow];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSString *error = [self performSetupInstallingRosetta:rosetta];
+        NSString *error = [self performSetup];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (error) [self fail:error];
             else [self launchAndQuit];
@@ -243,30 +250,11 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     });
 }
 
-- (BOOL)askToInstallRosetta {
-    NSAlert *alert = [NSAlert new];
-    alert.messageText = T(@"Нужна Rosetta 2", @"Rosetta 2 is required");
-    alert.informativeText = T(@"Игра работает через Wine, которому на Mac с чипом Apple нужна Rosetta 2. "
-                              @"Её установит macOS — понадобится пароль администратора.",
-                              @"The game runs through Wine, which needs Apple's Rosetta 2 on Apple silicon Macs. "
-                              @"macOS will install it and ask for an administrator password.");
-    [alert addButtonWithTitle:T(@"Установить", @"Install")];
-    [alert addButtonWithTitle:T(@"Выйти", @"Quit")];
-    return [alert runModal] == NSAlertFirstButtonReturn;
-}
-
-- (NSString *)performSetupInstallingRosetta:(BOOL)rosetta {
+- (NSString *)performSetup {
     NSFileManager *fm = NSFileManager.defaultManager;
     [fm createDirectoryAtPath:SupportDir() withIntermediateDirectories:YES attributes:nil error:nil];
     [fm createDirectoryAtPath:LogFile().stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
-
-    if (rosetta) {
-        [self setStatus:T(@"Устанавливаю Rosetta 2…", @"Installing Rosetta 2…")];
-        RunTool(@"/usr/bin/osascript",
-                @[@"-e", @"do shell script \"/usr/sbin/softwareupdate --install-rosetta --agree-to-license\" with administrator privileges"],
-                nil);
-        if (NeedsRosetta()) return T(@"Rosetta 2 не установилась.", @"Rosetta 2 was not installed.");
-    }
+    [fm createDirectoryAtPath:[SupportDir() stringByAppendingPathComponent:@"ARM64/cache"] withIntermediateDirectories:YES attributes:nil error:nil];
 
     [self setStatus:T(@"Копирую файлы игры…", @"Copying game files…")];
     // Key bindings the player changed since the last setup survive the refresh;
@@ -274,7 +262,7 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     NSString *controls = [GameDir() stringByAppendingPathComponent:@"data/control.txt"];
     NSDate *changed = [fm attributesOfItemAtPath:controls error:nil].fileModificationDate;
     NSDate *setUp = [fm attributesOfItemAtPath:StampFile() error:nil].fileModificationDate;
-    NSData *playerControls = (changed && setUp && [changed compare:setUp] == NSOrderedDescending)
+    NSData *playerControls = (changed && (!setUp || [changed compare:setUp] == NSOrderedDescending))
                                  ? [NSData dataWithContentsOfFile:controls] : nil;
 
     // ditto merges: bundled files are refreshed, the player's own files stay.
@@ -284,9 +272,10 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
 
     [self setStatus:T(@"Настраиваю Wine…", @"Setting up Wine…")];
     NSDictionary *env = WineEnvironment(YES);
-    if (RunTool(Res(@"wine/bin/wine"), @[@"wineboot", @"-u"], env) != 0)
+    if (RunTool(Wine(@"wine"), @[@"wineboot", @"-u"], env) != 0)
         return T(@"Wine не смог создать окружение.", @"Wine couldn't create its environment.");
-    RunTool(Res(@"wine/bin/wineserver"), @[@"-w"], env);
+    if (RunTool(Wine(@"wineserver"), @[@"-w"], env) != 0)
+        return T(@"Не удалось завершить настройку Wine.", @"Wine setup did not finish.");
 
     [BuildID() writeToFile:StampFile() atomically:YES encoding:NSUTF8StringEncoding error:nil];
     return nil;
@@ -409,6 +398,13 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
+        // Reproducible first-run verification without opening UI or the game.
+        if (argc == 2 && strcmp(argv[1], "--prepare-only") == 0) {
+            AppDelegate *delegate = [AppDelegate new];
+            NSString *error = [delegate performSetup];
+            if (error) fprintf(stderr, "%s\n", error.UTF8String);
+            return error ? 1 : 0;
+        }
         NSApplication *app = NSApplication.sharedApplication;
         AppDelegate *delegate = [AppDelegate new];
         delegate.showOptions = OptionKeyDown();

@@ -1,0 +1,19 @@
+NTSD.app bundles the following open-source software, unmodified except where noted.
+
+Wine 11.0 — https://www.winehq.org
+  License: GNU LGPL 2.1 or later. Source: https://gitlab.winehq.org/wine/wine
+  macOS build: https://github.com/Gcenx/macOS_Wine_builds (release 11.0_1)
+  Wine Mono and Wine Gecko were removed from the bundle; an extra rpath was
+  added to lib/wine/x86_64-unix/winegstreamer.so so it loads the bundled GStreamer.
+
+GStreamer 1.28.6 — https://gstreamer.freedesktop.org
+  License: GNU LGPL 2.1 or later (core and the bundled plugins, including mpg123).
+  Source: https://gitlab.freedesktop.org/gstreamer/gstreamer
+  Only the libraries and plugins needed for audio playback are included.
+
+GLib, libffi, libintl, ORC and other dependencies come from the same GStreamer
+runtime package; their licenses and sources are listed at
+https://gstreamer.freedesktop.org/documentation/frequently-asked-questions/licensing.html
+
+Naruto: The Setting Dawn is a free fan game by its own authors and is not covered
+by the licenses above.

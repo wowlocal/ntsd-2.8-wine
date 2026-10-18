@@ -1,0 +1,33 @@
+--- a/scripts/paths.sh
++++ b/scripts/paths.sh
+@@ -14,7 +14,7 @@
+     HADRON_PREFIX="$ROOT/prefix/release"
+     HADRON_OVERLAY_HELPER="$ROOT/build/notproton/overlay-shim.dylib"
+ else
+-    HADRON_LOGS="$HOME/Library/Logs/Hadron"
++    HADRON_LOGS="${HADRON_LOGS:-$HADRON_SUPPORT/logs}"
+     HADRON_VALVE="$HADRON_SUPPORT/valve/bridge"
+     HADRON_PREFIX="$HADRON_SUPPORT/prefix"
+     HADRON_OVERLAY_HELPER="$ROOT/steam/overlay-shim.dylib"
+--- a/scripts/play
++++ b/scripts/play
+@@ -172,6 +172,8 @@
+     <string>1</string>
+     <key>NSPrincipalClass</key>
+     <string>WineApplication</string>
++    <key>NSLocalNetworkUsageDescription</key>
++    <string>Connect to other NTSD players on your local network.</string>
+     <key>LSApplicationCategoryType</key>
+     <string>public.app-category.games</string>
+     <key>LSSupportsGameMode</key>
+@@ -229,8 +229,8 @@
+ gst="$ROOT/dist/gstreamer"
+ if [ -d "$gst/lib/gstreamer-1.0" ]; then
+-    mkdir -p "$HOME/Library/Caches/Hadron"
++    mkdir -p "$HADRON_SUPPORT/cache"
+     set -- "GST_PLUGIN_SYSTEM_PATH_1_0=$gst/lib/gstreamer-1.0" \
+            "GST_PLUGIN_SCANNER_1_0=$gst/libexec/gstreamer-1.0/gst-plugin-scanner" \
+-           "GST_REGISTRY_1_0=$HOME/Library/Caches/Hadron/gstreamer-registry-$(basename "$ROOT").bin" \
++           "GST_REGISTRY_1_0=$HADRON_SUPPORT/cache/gstreamer-registry-$(cat "$ROOT/VERSION").bin" \
+            ${GST_DEBUG:+"GST_DEBUG=$GST_DEBUG"} "$@"
+ fi

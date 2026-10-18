@@ -1,19 +1,26 @@
-NTSD.app bundles the following open-source software, unmodified except where noted.
+The ARM64 NTSD.app carries Hadron 0.3.1's open-source ARM64 Wine/FEX runtime.
+The Intel build uses launcher/intel-THIRD_PARTY_NOTICES.txt instead.
 
-Wine 11.0 — https://www.winehq.org
-  License: GNU LGPL 2.1 or later. Source: https://gitlab.winehq.org/wine/wine
-  macOS build: https://github.com/Gcenx/macOS_Wine_builds (release 11.0_1)
-  Wine Mono and Wine Gecko were removed from the bundle; an extra rpath was
-  added to lib/wine/x86_64-unix/winegstreamer.so so it loads the bundled GStreamer.
+Hadron: https://github.com/Broyojo/hadron/tree/v0.3.1
+Release commit: 3f5f18e2c08e22eb539f1fbbee52d4ba3d9e05c4
+Release DMG SHA-256:
+c2b1ac78b0151bb634b4a3eced8e305bddbd410d1d1e4dda99b36a9c96998192
 
-GStreamer 1.28.6 — https://gstreamer.freedesktop.org
-  License: GNU LGPL 2.1 or later (core and the bundled plugins, including mpg123).
-  Source: https://gitlab.freedesktop.org/gstreamer/gstreamer
-  Only the libraries and plugins needed for audio playback are included.
+All component licence texts, copyright notices, versions and corresponding-source
+references are preserved under Contents/Resources/runtime/licenses, including
+THIRD-PARTY-NOTICES.md. Hadron's sources.conf pins the upstream source revisions;
+its patches/ directory and build scripts supply the downstream changes.
 
-GLib, libffi, libintl, ORC and other dependencies come from the same GStreamer
-runtime package; their licenses and sources are listed at
-https://gstreamer.freedesktop.org/documentation/frequently-asked-questions/licensing.html
+Components include Wine (LGPL-2.1-or-later), FEX (MIT), GStreamer and FFmpeg
+(LGPL), and the graphics libraries and dependencies listed in those notices.
+Hadron's own code is BSD-3-Clause (runtime/licenses/hadron/LICENSE.hadron).
+
+NTSD's launcher/hadron-paths.patch relocates Hadron's log and GStreamer-cache
+directories into this app's private support directory. Runtime machine code,
+the Wine loader's signature and provisioning profile remain unmodified.
+
+The native host runtime translates the original game's x86 instructions with
+FEX. This is not a source port of the game engine.
 
 Naruto: The Setting Dawn is a free fan game by its own authors and is not covered
-by the licenses above.
+by the licences above. The game is supplied separately as its original ZIP.
