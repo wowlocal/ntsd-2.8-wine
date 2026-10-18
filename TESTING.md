@@ -111,6 +111,16 @@ Post-stapling DMG SHA-256:
 - FEX: `4e0fd356c66a9155b86ed46578f617fa76e06c31d8b43f8d0ac162c25dcbcdea`.
 - Rosetta: `702cbe9a3a89f95f281d9eded43ce1bc977b801748d2b5b4941795a314ed0fea`.
 
+The [combined prerelease v2.8.3.3.6](https://github.com/wowlocal/ntsd-2.8-wine/releases/tag/v2.8.3.3.6)
+contains both DMGs, their checksums, and the corresponding runtime source archive
+and checksum. All six uploaded GitHub asset digests match their local files.
+Previous v2.8.3.3.2 and v2.8.3.3.4 downloads remain intact; the former remains
+GitHub's latest stable release.
+
+`/Applications/NTSD FEX.app` also passes strict signature, stapling and Gatekeeper
+checks. Its installed runtime reaches the menu, and a fresh process sample
+reports **Code Type: ARM64** with its actual host path inside Applications.
+
 Notarization validates distribution signatures; the Rosetta gameplay failure
 on this host remains recorded above. Earlier private revision 5 candidates are
 not the published artifacts and their receipts are not used for revision 6.
