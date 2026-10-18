@@ -30,6 +30,36 @@ recovery deadline. The updated installed app reached its menu with system audio
 and all output probes successful. Frame captures preceded only this startup
 budget adjustment; the game, display support and CPU runtimes are unchanged.
 
+## Revision 7 distribution validation
+
+Both final apps and DMGs are Developer ID signed, notarized **Accepted**,
+stapled and validated. Gatekeeper reports **accepted**, source
+**Notarized Developer ID**, for both installed apps and both disk images.
+
+| Build | App notarization ID | DMG notarization ID |
+| --- | --- | --- |
+| FEX | `ccce8db8-2f5b-44a9-bf6e-c47b9b82770c` | `a1d9ae91-de8d-46fa-b12f-03f9ee5952ab` |
+| Rosetta | `8aeda8ab-7658-4165-9b80-d94ad4205fc5` | `8ba1ba57-db85-439a-b9da-688ed80b4ac9` |
+
+Both disk images were mounted read-only and checked again: strict signatures,
+stapling, expected architectures, original game EXE hash, matching source-app
+CDHash and absence of test environment overrides. FEX contains 131 ARM64-capable
+host files with no Intel-only host; Rosetta has 119 hardened host files and its
+universal launcher. The installed FEX game samples as ARM64 and Rosetta as
+X86-64 (translated), with both actual host paths inside Applications.
+
+Final post-stapling SHA-256:
+
+- FEX DMG: `58583902ba23c9a82f4cd740e2c4989e9d266498987f6c6203eb33b578fd86b4`.
+- Rosetta DMG: `e2011a2e096f3b2eefdd3d08b50cd2501b90458b4df35d605573fceab3f33255`.
+- Corresponding sources: `c06857677e64bf762298dc2710917350fe26eda63341ada8cedddf1c6545c889`.
+
+The [published combined prerelease v2.8.3.3.7](https://github.com/wowlocal/ntsd-2.8-wine/releases/tag/v2.8.3.3.7)
+contains both DMGs and checksums, plus complete pinned runtime sources and their
+checksum. All six GitHub asset digests match the local files. Earlier releases
+remain available. The final installed Rosetta app was left at its responsive
+main menu after validation.
+
 The earlier revision 6 failure and its receipts below are historical evidence.
 
 ---

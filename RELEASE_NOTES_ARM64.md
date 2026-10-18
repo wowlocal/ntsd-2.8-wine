@@ -11,7 +11,7 @@ are bounded; a failed/stalled device check selects clocked silent playback.
 Host executables use hardened runtime without microphone-input or App Sandbox
 entitlements. Multiplayer remains available through Online Game (TCP 12345).
 
-The signed FEX build completed local AI matches at 00:35 and 00:38, and fullscreen,
+Prior signed FEX candidates completed local AI matches at 00:35 and 00:38, and fullscreen,
 movement, jump, attack input, normal audio and timed silent recovery were
 exercised. The shared display integration probe passes under both Wine targets.
 Not every character, move, mode or remote multiplayer configuration was tested.
