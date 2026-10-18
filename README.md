@@ -35,12 +35,30 @@ Wine и GStreamer скачиваются в `.cache/` и проверяются 
   передаётся `CFProcessPath`, а бандл помечен `LSUIElement`, чтобы служебные
   процессы Wine не добавляли свои значки.
 
-## Раздача другим
+## Релиз (подпись + нотаризация)
 
-Приложение подписано ad-hoc, без нотаризации Apple. После скачивания macOS
-его заблокирует. Варианты:
-- System Settings → Privacy & Security → «Open Anyway»;
-- или в Терминале: `xattr -dr com.apple.quarantine /Applications/NTSD.app`.
+```sh
+./release.sh ~/Downloads/NTSD2.8.3.3.zip --publish
+```
+
+Скрипт собирает приложение, подписывает каждый Mach-O внутри
+(Developer ID, hardened runtime, `launcher/wine.entitlements` для исполняемых
+файлов Wine), нотаризует и степлит `.app` и `.dmg`, проверяет их через
+`spctl` и с `--publish` выкладывает DMG в GitHub Releases.
+
+Нужно:
+- сертификат «Developer ID Application» в связке ключей;
+- профиль notarytool (`NOTARY_KEYCHAIN_PROFILE`, по умолчанию `NotaryProfile`):
+  ```sh
+  xcrun notarytool store-credentials NotaryProfile --apple-id <apple-id> --team-id <team-id>
+  ```
+
+Release-сборка не запрашивает микрофон: под hardened runtime без entitlement
+`audio-input` macOS молча отказывает Wine в доступе. Локальная ad-hoc сборка
+(`build.sh`) спрашивает один раз — смело отвечайте «Не разрешать».
+
+Локальная ad-hoc сборка не нотаризована: на другом Mac её придётся открыть
+через System Settings → Privacy & Security → «Open Anyway».
 
 ## Удаление
 
