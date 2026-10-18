@@ -11,7 +11,10 @@ import tarfile
 root = Path(__file__).resolve().parents[1]
 cache = Path(sys.argv[1]).resolve(strict=True)
 output = Path(sys.argv[2]).resolve()
-sources = (cache / 'ntsd-runtime-fixes/SOURCES.txt').read_text()
+source_file = cache / 'ntsd-runtime-fixes/SOURCES.txt'
+if not source_file.exists():
+    source_file = cache / 'ntsd-runtime-fixes/WINDOWS-SOURCES.txt'
+sources = source_file.read_text()
 dsoal_commit = re.search(r'^DSOAL ([0-9a-f]{40})', sources, re.M).group(1)
 openal_commit = re.search(r'^OpenAL Soft ([0-9a-f]{40})', sources, re.M).group(1)
 key = hashlib.sha256((root / 'patches/dsoal-silent-fallback.patch').read_bytes()).hexdigest()[:16]
@@ -55,10 +58,12 @@ with tarfile.open(temporary, 'w:xz') as archive:
                 member.name = f'{prefix}/{name}/{member.name}'
                 archive.addfile(metadata(member), stream)
     for name in ['patches', 'launcher', 'tools/build-runtime-fixes.sh',
-                 'tools/package_runtime_sources.py']:
+                 'tools/package_runtime_sources.py', 'tools/build-windows-support.sh',
+                 'tools/runtime-build-common.sh', 'vendor/minhook']:
         archive.add(root / name, arcname=f'{prefix}/{name}', filter=metadata)
-    archive.add(cache / 'ntsd-runtime-fixes/FEX-LICENSE',
-                arcname=f'{prefix}/FEX-LICENSE', filter=metadata)
+    if (cache / 'ntsd-runtime-fixes/FEX-LICENSE').exists():
+        archive.add(cache / 'ntsd-runtime-fixes/FEX-LICENSE',
+                    arcname=f'{prefix}/FEX-LICENSE', filter=metadata)
     add_text(archive, 'SOURCES.txt', sources)
     add_text(archive, 'README.txt',
              'Complete upstream DSOAL and OpenAL Soft sources, downstream patches and build helpers.\n\n'

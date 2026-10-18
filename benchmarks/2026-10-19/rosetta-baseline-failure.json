@@ -1,0 +1,46 @@
+{
+  "status": "blocked",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "memory_gib": 24,
+    "os": "macOS 27.0.1 (26A434)"
+  },
+  "runtime": "Intel Wine 11.0_1 / Rosetta",
+  "game_sha256": "5eda51440039099069d041e5bd13fde8be9fd8c7b20983985b1712a59719d86b",
+  "wrapper": "2.8.3.3.6",
+  "attempts": [
+    {
+      "audio": "silent",
+      "scaling_dll": true,
+      "result": "stack overflow after first full-window copy"
+    },
+    {
+      "audio": "silent",
+      "scaling_dll": false,
+      "result": "stack overflow after first full-window copy"
+    },
+    {
+      "audio": "system",
+      "scaling_dll": false,
+      "result": "page fault at 0x7bf21139; exception frame outside stack limits"
+    }
+  ],
+  "independent_checks": {
+    "system_directsound": "pass",
+    "software_directsound_null_backend": "pass",
+    "display_integration": "pass",
+    "dns_tcp_udp_inbound_tcp": "pass"
+  },
+  "frame_time_summary": null,
+  "exclusions": [
+    "No gameplay workload established",
+    "No numeric comparison or performance winner claimed"
+  ],
+  "additional_diagnostic": {
+    "stack_reserve_mib": 16,
+    "stack_commit_kib": 64,
+    "scope": "isolated test executable only; not shipped",
+    "result": "same startup page fault",
+    "original_executable_restored": true
+  }
+}

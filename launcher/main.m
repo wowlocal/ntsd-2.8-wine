@@ -34,12 +34,14 @@ static NSString *SupportDir(void) {
 }
 
 static NSString *PrefixDir(void) { return [[SupportDir() stringByAppendingPathComponent:@"Prefix-arm64"] stringByResolvingSymlinksInPath]; }
-static NSString *GameDir(void) { return [[SupportDir() stringByAppendingPathComponent:@"Game"] stringByResolvingSymlinksInPath]; }
+static NSString *GameDir(void) { return [[SupportDir() stringByAppendingPathComponent:@"Game-arm64"] stringByResolvingSymlinksInPath]; }
 static NSString *StampFile(void) { return [SupportDir() stringByAppendingPathComponent:@".setup-version-arm64"]; }
 static NSString *LogFile(void) { return [SupportDir() stringByAppendingPathComponent:@"Logs/NTSD.log"]; }
 static NSString *Wine(NSString *tool) { return Res([@"runtime/dist/bin" stringByAppendingPathComponent:tool]); }
 static BOOL silentAudio;
 static NSString *BuildID(void) { return NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"] ?: @"0"; }
+
+#include "audio-tool-timeout.h"
 
 #pragma mark - State checks
 
@@ -87,8 +89,8 @@ static NSDictionary<NSString *, NSString *> *WineEnvironment(BOOL forSetup) {
         env[@"DSOAL_LOGLEVEL"] = @"1";
     }
     env[@"WINEDLLOVERRIDES"] = forSetup ? @"mscoree,mshtml=;winemenubuilder.exe=d;winemac.drv=d"
-                                        : (silentAudio ? @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=n"
-                                                       : @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=b");
+                                        : (silentAudio ? @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=n;ddraw=n,b"
+                                                       : @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=b;ddraw=n,b");
     env[@"GST_PLUGIN_SYSTEM_PATH_1_0"] = [gst stringByAppendingPathComponent:@"lib/gstreamer-1.0"];
     env[@"GST_PLUGIN_SCANNER_1_0"] = [gst stringByAppendingPathComponent:@"libexec/gstreamer-1.0/gst-plugin-scanner"];
     env[@"GST_REGISTRY_1_0"] = [SupportDir() stringByAppendingPathComponent:@"ARM64/cache/gstreamer-registry-0.3.1.bin"];
@@ -156,6 +158,14 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     [log writeData:[[NSString stringWithFormat:@"%@ exited %d\n", path.lastPathComponent, result] dataUsingEncoding:NSUTF8StringEncoding]];
     return result;
 }
+
+static int RunWindowsAudioTool(NSString *helper, NSArray<NSString *> *args,
+                               NSDictionary *env, NSTimeInterval timeout) {
+    NSArray *command = [@[@"ntsd-audio", Res(helper)] arrayByAddingObjectsFromArray:args];
+    return RunAudioTool(Res(@"runtime/scripts/play"), command, env, timeout);
+}
+
+#include "audio-startup.h"
 
 #pragma mark - App
 
@@ -268,6 +278,14 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     [fm createDirectoryAtPath:[SupportDir() stringByAppendingPathComponent:@"ARM64/cache"] withIntermediateDirectories:YES attributes:nil error:nil];
 
     [self setStatus:T(@"Копирую файлы игры…", @"Copying game files…")];
+    // Migrate player files once, then keep the two runtimes' writable copies
+    // independent so launching/updating one cannot replace the other's DLLs.
+    NSString *legacyGame = [SupportDir() stringByAppendingPathComponent:@"Game"];
+    if (![fm fileExistsAtPath:GameDir()] && [fm fileExistsAtPath:legacyGame]) {
+        if (RunTool(@"/usr/bin/ditto", @[legacyGame, GameDir()], nil) != 0)
+            return T(@"Не удалось перенести файлы игры.", @"Couldn't migrate the game files.");
+    }
+
     // Key bindings the player changed since the last setup survive the refresh;
     // untouched ones pick up the new bundled defaults.
     NSString *controls = [GameDir() stringByAppendingPathComponent:@"data/control.txt"];
@@ -288,6 +306,9 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     if (RunTool(Wine(@"wineserver"), @[@"-w"], env) != 0)
         return T(@"Не удалось завершить настройку Wine.", @"Wine setup did not finish.");
 
+    if (RunTool(Wine(@"wine"), @[@"reg", @"add", @"HKCU\\Software\\Wine\\Mac Driver", @"/v", @"RetinaMode", @"/t", @"REG_SZ", @"/d", @"Y", @"/f"], env) != 0)
+        return T(@"Не удалось настроить экран.", @"Couldn't configure the display.");
+
     [BuildID() writeToFile:StampFile() atomically:YES encoding:NSUTF8StringEncoding error:nil];
     return nil;
 }
@@ -300,15 +321,7 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     [self showWindow];
     self.statusLabel.stringValue = T(@"Проверяю звук…", @"Checking audio…");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSString *mode = NSProcessInfo.processInfo.environment[@"NTSD_AUDIO"] ?: @"auto";
-        silentAudio = [mode isEqualToString:@"silent"] ||
-            (![mode isEqualToString:@"system"] && RunTool(Res(@"audio-probe"), @[], nil) != 0);
-        NSMutableDictionary *setupEnv = [WineEnvironment(NO) mutableCopy];
-        // Quartz imports DirectSound while creating its filter mapper. The
-        // fallback DLL lives beside the game, not beside this setup helper.
-        setupEnv[@"WINEDLLOVERRIDES"] = @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=b";
-        int result = RunTool(Res(@"runtime/scripts/play"), @[@"ntsd-audio", Res(@"audio-config.exe"),
-                              silentAudio ? @"silent" : @"system"], setupEnv);
+        int result = PrepareAudio();
         dispatch_async(dispatch_get_main_queue(), ^{
             if (result != 0) { [self fail:T(@"Не удалось настроить звук.", @"Couldn't configure audio.")]; return; }
             self.statusLabel.stringValue = silentAudio

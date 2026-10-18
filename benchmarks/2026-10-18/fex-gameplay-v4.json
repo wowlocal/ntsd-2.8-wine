@@ -1,0 +1,20 @@
+{
+  "frames": 1818,
+  "intervals": 1817,
+  "duration_s": 59.97,
+  "average_fps": 30.298482574620643,
+  "mean_ms": 33.004953219592736,
+  "p50_ms": 32.0,
+  "p95_ms": 39.0,
+  "p99_ms": 45.0,
+  "max_ms": 98,
+  "over50": 5,
+  "over100": 0,
+  "timestamp_resolution_ms": 1,
+  "dst": "0x1201007e",
+  "start_s": 147040.291,
+  "end_s": 147100.261,
+  "source": "fex-gameplay-v4.csv",
+  "workload": "Naruto and Sasuke, two humans, no bots, Wharf, idle gameplay, system audio, 1333x730 client",
+  "wrapper": "2.8.3.3.4"
+}

@@ -10,7 +10,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 GAME_ZIP="${1:-$HOME/Downloads/NTSD2.8.3.3.zip}"
-REVISION=4   # bump when the wrapper changes, so existing installs re-run setup
+REVISION=6   # bump when the wrapper changes, so existing installs re-run setup
 
 HADRON_VERSION=0.3.1
 HADRON_URL="https://github.com/Broyojo/hadron/releases/download/v${HADRON_VERSION}/Hadron-${HADRON_VERSION}.dmg"
@@ -21,7 +21,7 @@ BUILD="${NTSD_BUILD_DIR:-$ROOT/build}"
 mkdir -p "$CACHE" "$BUILD"
 CACHE="$(cd "$CACHE" && pwd)"
 BUILD="$(cd "$BUILD" && pwd)"
-APP="$BUILD/NTSD.app"
+APP="$BUILD/NTSD FEX.app"
 WORK="$(mktemp -d "$BUILD/.work.XXXXXX")"
 MOUNT="$WORK/hadron"
 cleanup() {
@@ -84,7 +84,7 @@ done
 cp "$FIXES/libwow64fex.so" "$RES/runtime/dist/lib/wine/aarch64-unix/libwow64fex.so"
 rm "$RES/runtime/dist/bin/wine"
 cp "$FIXES/wine4k" "$RES/runtime/dist/bin/wine"
-cp "$FIXES/audio-probe" "$FIXES/audio-config.exe" "$RES/"
+cp "$FIXES/audio-probe" "$FIXES/audio-probe.exe" "$FIXES/audio-config.exe" "$RES/"
 cp -R "$FIXES/audio-licenses" "$RES/runtime/licenses/ntsd-audio"
 cp "$FIXES/FEX-LICENSE" "$FIXES/SOURCES.txt" "$RES/runtime/licenses/"
 mkdir -p "$RES/runtime/licenses/ntsd-patches"
@@ -93,7 +93,7 @@ cp -R "$ROOT/patches/" "$RES/runtime/licenses/ntsd-patches/"
 step "Game: $GAME_TOP"
 unzip -q "$GAME_ZIP" -d "$WORK/game"
 mv "$WORK/game/$GAME_TOP" "$RES/game"
-cp "$FIXES/dsound.dll" "$FIXES/dsoal-aldrv.dll" "$RES/game/"
+cp "$FIXES/ddraw.dll" "$FIXES/dsound.dll" "$FIXES/dsoal-aldrv.dll" "$RES/game/"
 # Default keys put attack/jump/defend for players 1 and 2 on the numeric
 # keypad (Windows VK 100-102 / 97-99), which most Macs don't have. Use J/K/L
 # for player 1, as in the original LF2, and , . / next to the arrows for player 2.
@@ -102,6 +102,10 @@ grep -q '^0 87 83 65 68 100 101 102 ' "$CONTROLS" && grep -q '^0 38 40 37 39 97 
     || { echo "unexpected data/control.txt layout, update the key patch" >&2; exit 1; }
 sed -i '' -e '1s/^0 87 83 65 68 100 101 102 /0 87 83 65 68 74 75 76 /' \
           -e '2s/^0 38 40 37 39 97 98 99 /0 38 40 37 39 188 190 191 /' "$CONTROLS"
+
+mkdir -p "$RES/licenses"
+cp -R "$FIXES/audio-licenses" "$FIXES/toolchain-licenses" "$RES/licenses/"
+cp "$FIXES/MinHook-LICENSE.txt" "$FIXES/WINDOWS-SOURCES.txt" "$RES/licenses/"
 
 step "Launcher"
 xcrun clang -arch arm64 -mmacosx-version-min=27.0 -fobjc-arc -O2 -Wall \
@@ -131,9 +135,9 @@ du -sh "$APP"
 
 if [[ -z "${NO_DMG:-}" ]]; then
     step "Disk image"
-    DMG="$BUILD/NTSD-${GAME_VERSION}-arm64-experimental-macOS.dmg"
+    DMG="$BUILD/NTSD-${GAME_VERSION}-FEX-macOS.dmg"
     mkdir "$WORK/dmg"
-    cp -R "$APP" "$WORK/dmg/"
+    ditto "$APP" "$WORK/dmg/$(basename "$APP")"
     ln -s /Applications "$WORK/dmg/Applications"
     hdiutil create -quiet -ov -volname "NTSD ${GAME_VERSION}" -srcfolder "$WORK/dmg" -format ULMO "$DMG"
     du -sh "$DMG"

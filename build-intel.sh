@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds build/NTSD.app (and a .dmg) from the NTSD zip, an open-source Wine
+# Builds build/NTSD Rosetta.app (and a .dmg) from the NTSD zip, an open-source Wine
 # build (Gcenx/macOS_Wine_builds) and the GStreamer runtime.
 #
 #   ./build.sh [path/to/NTSD<version>.zip]
@@ -10,7 +10,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 GAME_ZIP="${1:-$HOME/Downloads/NTSD2.8.3.3.zip}"
-REVISION=2   # bump when the wrapper changes, so existing installs re-run setup
+REVISION=6   # bump when the wrapper changes, so existing installs re-run setup
 
 WINE_VERSION=11.0_1
 WINE_URL="https://github.com/Gcenx/macOS_Wine_builds/releases/download/${WINE_VERSION}/wine-stable-${WINE_VERSION}-osx64.tar.xz"
@@ -23,7 +23,7 @@ GST_SHA256=a8eb366c59b7e9e5dc049848fed6bcd203a8878aa7517c051639fda78797c6ad
 CACHE="${NTSD_CACHE_DIR:-$ROOT/.cache}"
 BUILD="${NTSD_BUILD_DIR:-$ROOT/build}"
 mkdir -p "$BUILD"
-APP="$BUILD/NTSD.app"
+APP="$BUILD/NTSD Rosetta.app"
 WORK="$(mktemp -d "$BUILD/.work.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -80,8 +80,18 @@ grep -q '^0 87 83 65 68 100 101 102 ' "$CONTROLS" && grep -q '^0 38 40 37 39 97 
 sed -i '' -e '1s/^0 87 83 65 68 100 101 102 /0 87 83 65 68 74 75 76 /' \
           -e '2s/^0 38 40 37 39 97 98 99 /0 38 40 37 39 188 190 191 /' "$CONTROLS"
 
+step "Shared Windows display and audio support"
+FIXES="$CACHE/ntsd-runtime-fixes"
+"$ROOT/tools/build-windows-support.sh" "$FIXES"
+cp "$FIXES/ddraw.dll" "$FIXES/dsound.dll" "$FIXES/dsoal-aldrv.dll" "$RES/game/"
+cp "$FIXES/audio-probe" "$FIXES/audio-probe.exe" "$FIXES/audio-config.exe" "$RES/"
+
+mkdir -p "$RES/licenses"
+cp -R "$FIXES/audio-licenses" "$FIXES/toolchain-licenses" "$RES/licenses/"
+cp "$FIXES/MinHook-LICENSE.txt" "$FIXES/WINDOWS-SOURCES.txt" "$RES/licenses/"
+
 step "Launcher"
-clang -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -fobjc-arc -O2 -Wall \
+xcrun clang -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -fobjc-arc -O2 -Wall \
     -framework Cocoa -framework CoreGraphics \
     "$ROOT/launcher/intel-main.m" -o "$APP/Contents/MacOS/NTSD"
 sed -e "s/@GAME_VERSION@/$GAME_VERSION/g" -e "s/@BUILD_VERSION@/$BUILD_VERSION/g" \
@@ -107,14 +117,14 @@ while IFS= read -r -d '' file; do
     if [[ "$kind" == *executable* ]]; then sign "$file" "$ROOT/launcher/wine.entitlements"; else sign "$file"; fi
 done < <(find "$RES" -type f -print0)
 sign "$APP"
-codesign --verify --deep --strict "$APP"
+python3 "$ROOT/tools/verify_intel_bundle.py" "$APP"
 du -sh "$APP"
 
 if [[ -z "${NO_DMG:-}" ]]; then
     step "Disk image"
-    DMG="$BUILD/NTSD-${GAME_VERSION}-macOS.dmg"
+    DMG="$BUILD/NTSD-${GAME_VERSION}-Rosetta-macOS.dmg"
     mkdir "$WORK/dmg"
-    cp -R "$APP" "$WORK/dmg/"
+    ditto "$APP" "$WORK/dmg/$(basename "$APP")"
     ln -s /Applications "$WORK/dmg/Applications"
     hdiutil create -quiet -ov -volname "NTSD ${GAME_VERSION}" -srcfolder "$WORK/dmg" -format ULMO "$DMG"
     du -sh "$DMG"

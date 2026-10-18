@@ -28,6 +28,8 @@ static NSString *Res(NSString *path) {
 }
 
 static NSString *SupportDir(void) {
+    NSString *override = NSProcessInfo.processInfo.environment[@"NTSD_SUPPORT_DIR"];
+    if (override.length && override.isAbsolutePath) return override;
     NSString *base = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
     return [base stringByAppendingPathComponent:@"NTSD"];
 }
@@ -35,8 +37,11 @@ static NSString *SupportDir(void) {
 static NSString *PrefixDir(void) { return [SupportDir() stringByAppendingPathComponent:@"Prefix"]; }
 static NSString *GameDir(void) { return [SupportDir() stringByAppendingPathComponent:@"Game"]; }
 static NSString *StampFile(void) { return [SupportDir() stringByAppendingPathComponent:@".setup-version"]; }
-static NSString *LogFile(void) { return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/NTSD.log"]; }
+static NSString *LogFile(void) { return [SupportDir() stringByAppendingPathComponent:@"Logs/Rosetta.log"]; }
+static BOOL silentAudio;
 static NSString *BuildID(void) { return NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"] ?: @"0"; }
+
+#include "audio-tool-timeout.h"
 
 #pragma mark - State checks
 
@@ -59,25 +64,61 @@ static BOOL OptionKeyDown(void) {
     return (CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState) & kCGEventFlagMaskAlternate) != 0;
 }
 
+static NSString *GameBundlePath(void) {
+    return [SupportDir() stringByAppendingPathComponent:@"Rosetta/NTSD Rosetta.app"];
+}
+
+// Give Wine its own app identity. The native setup process exits after launch;
+// Cocoa and accessibility must identify the remaining Wine process independently.
+static BOOL PrepareGameBundle(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *contents = [GameBundlePath() stringByAppendingPathComponent:@"Contents"];
+    NSString *mac = [contents stringByAppendingPathComponent:@"MacOS"];
+    NSString *resources = [contents stringByAppendingPathComponent:@"Resources"];
+    if (![fm createDirectoryAtPath:mac withIntermediateDirectories:YES attributes:nil error:nil] ||
+        ![fm createDirectoryAtPath:resources withIntermediateDirectories:YES attributes:nil error:nil]) return NO;
+    NSDictionary *info = @{@"CFBundleExecutable": @"wine", @"CFBundleIdentifier": @"local.ntsd.mac.rosetta.game",
+        @"CFBundleName": @"NTSD Rosetta", @"CFBundleDisplayName": @"NTSD Rosetta", @"CFBundleVersion": BuildID(),
+        @"CFBundlePackageType": @"APPL", @"CFBundleIconFile": @"AppIcon", @"NSPrincipalClass": @"WineApplication",
+        @"LSUIElement": @YES, @"NSHighResolutionCapable": @YES,
+        @"NSLocalNetworkUsageDescription": @"Connect to other NTSD players on your local network."};
+    if (![info writeToFile:[contents stringByAppendingPathComponent:@"Info.plist"] atomically:YES]) return NO;
+    for (NSString *relative in @[@"MacOS/wine", @"Resources/AppIcon.icns"]) {
+        NSString *link = [contents stringByAppendingPathComponent:relative];
+        NSString *target = Res([relative hasSuffix:@"wine"] ? @"wine/bin/wine" : @"AppIcon.icns");
+        if (![[fm destinationOfSymbolicLinkAtPath:link error:nil] isEqualToString:target]) {
+            [fm removeItemAtPath:link error:nil];
+            if (![fm createSymbolicLinkAtPath:link withDestinationPath:target error:nil]) return NO;
+        }
+    }
+    return YES;
+}
+
 #pragma mark - Wine
 
 // forSetup: wineboot runs without the Mac display driver so it can't pop up
 // its own "updating configuration" window over ours.
 static NSDictionary<NSString *, NSString *> *WineEnvironment(BOOL forSetup) {
-    NSMutableDictionary *env = [NSProcessInfo.processInfo.environment mutableCopy];
+    NSDictionary *host = NSProcessInfo.processInfo.environment;
+    NSMutableDictionary *env = [NSMutableDictionary dictionary];
+    for (NSString *key in @[@"HOME", @"USER", @"LOGNAME", @"LANG", @"TMPDIR"])
+        if (host[key]) env[key] = host[key];
+    env[@"PATH"] = @"/usr/bin:/bin:/usr/sbin:/sbin";
     NSString *gst = Res(@"gstreamer");
     env[@"WINEPREFIX"] = PrefixDir();
-    env[@"WINEDEBUG"] = @"-all";
+    env[@"WINEDEBUG"] = host[@"NTSD_WINEDEBUG"] ?: @"-all";
     env[@"MVK_CONFIG_LOG_LEVEL"] = @"0";
     env[@"WINEDLLOVERRIDES"] = forSetup ? @"mscoree,mshtml=;winemenubuilder.exe=d;winemac.drv=d"
-                                        : @"mscoree,mshtml=;winemenubuilder.exe=d";
+                                        : (silentAudio ? @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=n;ddraw=n,b"
+                                                       : @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=b;ddraw=n,b");
+    if (silentAudio) env[@"ALSOFT_DRIVERS"] = @"null";
     env[@"GST_PLUGIN_SYSTEM_PATH"] = [gst stringByAppendingPathComponent:@"lib/gstreamer-1.0"];
     env[@"GST_PLUGIN_SCANNER"] = [gst stringByAppendingPathComponent:@"libexec/gstreamer-1.0/gst-plugin-scanner"];
     env[@"GST_REGISTRY"] = [SupportDir() stringByAppendingPathComponent:@"gstreamer-registry.bin"];
     [env removeObjectForKey:@"GST_PLUGIN_PATH"];
     // Makes Wine's process register with the Dock as this bundle (name + icon)
     // instead of as a bare "wine" binary.
-    if (!forSetup) env[@"CFProcessPath"] = NSBundle.mainBundle.executablePath;
+    if (!forSetup) env[@"CFProcessPath"] = [GameBundlePath() stringByAppendingPathComponent:@"Contents/MacOS/wine"];
     return env;
 }
 
@@ -99,9 +140,12 @@ static int SpawnGame(pid_t *pid) {
     posix_spawn_file_actions_addchdir_np(&actions, GameDir().fileSystemRepresentation);
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, LogFile().fileSystemRepresentation,
-                                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                                     O_WRONLY | O_CREAT | O_APPEND, 0644);
     posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
-    int rc = posix_spawn(pid, wine, &actions, NULL, argv, EnvironmentBlock(WineEnvironment(NO)));
+    char **env = EnvironmentBlock(WineEnvironment(NO));
+    int rc = posix_spawn(pid, wine, &actions, NULL, argv, env);
+    for (char **entry = env; *entry; entry++) free(*entry);
+    free(env);
     posix_spawn_file_actions_destroy(&actions);
     return rc;
 }
@@ -109,8 +153,8 @@ static int SpawnGame(pid_t *pid) {
 // The game's process registers as this bundle (see CFProcessPath) and Wine
 // switches it to a regular app once its window is up.
 static NSRunningApplication *GameApplication(void) {
-    for (NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:NSBundle.mainBundle.bundleIdentifier]) {
-        if (app.processIdentifier != getpid() && app.activationPolicy == NSApplicationActivationPolicyRegular) return app;
+    for (NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:@"local.ntsd.mac.rosetta.game"]) {
+        if ([app.bundleURL.path isEqualToString:GameBundlePath()] && app.processIdentifier != getpid() && app.activationPolicy == NSApplicationActivationPolicyRegular) return app;
     }
     return nil;
 }
@@ -133,6 +177,13 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     [task waitUntilExit];
     return task.terminationStatus;
 }
+
+static int RunWindowsAudioTool(NSString *helper, NSArray<NSString *> *args,
+                               NSDictionary *env, NSTimeInterval timeout) {
+    return RunAudioTool(Res(@"wine/bin/wine"), [@[Res(helper)] arrayByAddingObjectsFromArray:args], env, timeout);
+}
+
+#include "audio-startup.h"
 
 #pragma mark - App
 
@@ -224,7 +275,7 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
         return;
     }
     if (!NeedsRosetta() && !NeedsSetup()) {
-        [self launchAndQuit];
+        [self prepareAudioAndLaunch];
         return;
     }
     [self comeForward];
@@ -238,7 +289,7 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
         NSString *error = [self performSetupInstallingRosetta:rosetta];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (error) [self fail:error];
-            else [self launchAndQuit];
+            else [self prepareAudioAndLaunch];
         });
     });
 }
@@ -288,8 +339,27 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
         return T(@"Wine не смог создать окружение.", @"Wine couldn't create its environment.");
     RunTool(Res(@"wine/bin/wineserver"), @[@"-w"], env);
 
+    if (RunTool(Res(@"wine/bin/wine"), @[@"reg", @"add", @"HKCU\\Software\\Wine\\Mac Driver", @"/v", @"RetinaMode", @"/t", @"REG_SZ", @"/d", @"Y", @"/f"], env) != 0)
+        return T(@"Не удалось настроить экран.", @"Couldn't configure the display.");
+
     [BuildID() writeToFile:StampFile() atomically:YES encoding:NSUTF8StringEncoding error:nil];
     return nil;
+}
+
+- (void)prepareAudioAndLaunch {
+    [self comeForward];
+    [self showWindow];
+    self.statusLabel.stringValue = T(@"Проверяю звук…", @"Checking audio…");
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        int result = PrepareGameBundle() ? PrepareAudio() : -1;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (result != 0) { [self fail:T(@"Не удалось настроить звук.", @"Couldn't configure audio.")]; return; }
+            self.statusLabel.stringValue = silentAudio
+                ? T(@"Звук недоступен. Запускаю без звука…", @"Audio unavailable. Starting without sound…")
+                : T(@"Запускаю игру…", @"Starting the game…");
+            [self launchAndQuit];
+        });
+    });
 }
 
 // Since macOS 14 an app can't bring itself forward unless the user launched

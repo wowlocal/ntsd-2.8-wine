@@ -58,7 +58,9 @@ def main():
         if not archs:
             continue
         assert 0x0100000c in archs, f'No ARM64 slice: {path}'
-        assert not entitlements(path).get('com.apple.security.app-sandbox', False), f'Sandbox restricts networking: {path}'
+        rights = entitlements(path)
+        assert not rights.get('com.apple.security.app-sandbox', False), f'Sandbox restricts networking: {path}'
+        assert not rights.get('com.apple.security.device.audio-input', False), f'Unexpected microphone capability: {path}'
         host_files.append(str(path.relative_to(app)))
     assert architectures(app / 'Contents/MacOS/NTSD') == {0x0100000c}
     check('codesign', '--verify', '--deep', '--strict', str(app))

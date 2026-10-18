@@ -49,15 +49,25 @@ def echo_udp():
 threads = [threading.Thread(target=echo_tcp, daemon=True), threading.Thread(target=echo_udp, daemon=True)]
 for thread in threads:
     thread.start()
-runtime = app.resolve() / 'Contents/Resources/runtime'
+resources = app.resolve() / 'Contents/Resources'
+runtime = resources / 'runtime'
+arm64 = runtime.is_dir()
 env = {k: os.environ[k] for k in ('HOME', 'USER', 'LANG', 'TMPDIR') if k in os.environ}
-env.update(PATH='/usr/bin:/bin:/usr/sbin:/sbin', WINEPREFIX=str(support.resolve() / 'Prefix-arm64'),
-           HADRON_SUPPORT=str(support.resolve() / 'ARM64'), HADRON_PROGRAM='1', FEX_DISKCACHE='0',
-           HADRON_APP_NAME='NTSD network probe', WINEDEBUG='-all',
+env.update(PATH='/usr/bin:/bin:/usr/sbin:/sbin', WINEDEBUG='-all',
            WINEDLLOVERRIDES='mscoree,mshtml=;winemenubuilder.exe=d')
+if arm64:
+    env.update(WINEPREFIX=str(support.resolve() / 'Prefix-arm64'),
+               HADRON_SUPPORT=str(support.resolve() / 'ARM64'), HADRON_PROGRAM='1',
+               FEX_DISKCACHE='0', FEX_SMCCHECKS='mtrack',
+               HADRON_APP_NAME='NTSD network probe')
+    command = [str(runtime / 'scripts/play'), 'ntsd-network-probe', str(exe)]
+    server = runtime / 'dist/bin/wineserver'
+else:
+    env['WINEPREFIX'] = str(support.resolve() / 'Prefix')
+    command = [str(resources / 'wine/bin/wine'), str(exe)]
+    server = resources / 'wine/bin/wineserver'
 log = (work / 'network-runtime.log').open('w')
-process = subprocess.Popen([str(runtime / 'scripts/play'), 'ntsd-network-probe', str(exe),
-                            str(tcp.getsockname()[1]), str(udp.getsockname()[1])],
+process = subprocess.Popen(command + [str(tcp.getsockname()[1]), str(udp.getsockname()[1])],
                            env=env, stdout=subprocess.PIPE, stderr=log)
 selector = selectors.DefaultSelector()
 selector.register(process.stdout, selectors.EVENT_READ)
@@ -82,8 +92,9 @@ try:
                 sample = work / 'native-process-sample.txt'
                 subprocess.run(['/usr/bin/sample', str(process.pid), '1', '10', '-file', str(sample)],
                                stdout=log, stderr=log, check=True)
-                assert re.search(r'^Code Type:\s+(?:ARM64|ARM-64 \(Native\))\s*$', sample.read_text(), re.M), \
-                    'Probe did not run as a native ARM64 process'
+                expected = r'(?:ARM64|ARM-64 \(Native\))' if arm64 else r'X86-64(?: \(translated\))?'
+                assert re.search(r'^Code Type:\s+' + expected + r'\s*$', sample.read_text(), re.M), \
+                    'Probe host architecture does not match the selected runtime'
                 # Bind was INADDR_ANY: test an inbound connection from the host.
                 with socket.create_connection(('127.0.0.1', port), timeout=10) as connection:
                     connection.sendall(b'host-to-Windows')
@@ -93,7 +104,7 @@ try:
     assert status == 0 and port is not None and not errors, (status, errors)
 finally:
     if process.poll() is None:
-        subprocess.run([str(runtime / 'dist/bin/wineserver'), '-k'], env=env, check=False)
+        subprocess.run([str(server), '-k'], env=env, check=False)
         process.wait(timeout=10)
     log.close()
     selector.close()

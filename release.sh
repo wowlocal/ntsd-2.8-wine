@@ -18,14 +18,34 @@ done
 
 PROFILE="${NOTARY_KEYCHAIN_PROFILE:-codex-notary}"
 OUTPUT="${NTSD_BUILD_DIR:-$ROOT/build}"
+if [[ "${NTSD_RUNTIME:-both}" == both ]]; then
+    # Each target gets an isolated output directory and full signing/notarization.
+    NTSD_RUNTIME=arm64 NTSD_BUILD_DIR="$OUTPUT/fex" "$ROOT/release.sh" "${ARGS[@]+"${ARGS[@]}"}"
+    NTSD_RUNTIME=intel NTSD_BUILD_DIR="$OUTPUT/rosetta" "$ROOT/release.sh" "${ARGS[@]+"${ARGS[@]}"}"
+    APP="$OUTPUT/fex/NTSD FEX.app"
+    VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+    BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+    INTEL_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$OUTPUT/rosetta/NTSD Rosetta.app/Contents/Info.plist")"
+    [[ "$BUILD" == "$INTEL_BUILD" ]] || { echo 'Both targets must have the same wrapper revision' >&2; exit 1; }
+    if [[ "$PUBLISH" == 1 ]]; then
+        gh release create "v$BUILD" \
+            "$OUTPUT/fex/NTSD-${VERSION}-FEX-macOS.dmg" "$OUTPUT/fex/NTSD-${VERSION}-FEX-macOS.dmg.sha256" \
+            "$OUTPUT/rosetta/NTSD-${VERSION}-Rosetta-macOS.dmg" "$OUTPUT/rosetta/NTSD-${VERSION}-Rosetta-macOS.dmg.sha256" \
+            "$OUTPUT/fex/NTSD-${BUILD}-runtime-sources.tar.xz" "$OUTPUT/fex/NTSD-${BUILD}-runtime-sources.tar.xz.sha256" \
+            --prerelease --title "NTSD $VERSION for macOS: FEX and Rosetta" --notes-file "$ROOT/RELEASE_NOTES.md"
+    fi
+    exit 0
+fi
 case "${NTSD_RUNTIME:-arm64}" in
     arm64)
-        DMG_SUFFIX=arm64-experimental-macOS
+        APP_NAME="NTSD FEX.app"
+        DMG_SUFFIX=FEX-macOS
         NOTES="$ROOT/RELEASE_NOTES_ARM64.md"
         PUBLISH_ARGS=(--prerelease)
         ;;
     intel)
-        DMG_SUFFIX=macOS
+        APP_NAME="NTSD Rosetta.app"
+        DMG_SUFFIX=Rosetta-macOS
         NOTES="$ROOT/RELEASE_NOTES.md"
         PUBLISH_ARGS=()
         ;;
@@ -51,8 +71,18 @@ if result.get('status') != 'Accepted':
 PY
 }
 
-SIGN_IDENTITY="$IDENTITY" NO_DMG=1 "$ROOT/build.sh" "${ARGS[@]+"${ARGS[@]}"}"
-APP="$OUTPUT/NTSD.app"
+APP="$OUTPUT/$APP_NAME"
+if [[ "${NTSD_REUSE_BUILD:-0}" == 1 ]]; then
+    # Finalize an already built and tested Developer ID-signed artifact.
+    [[ -d "$APP" ]] || { echo "built app missing: $APP" >&2; exit 1; }
+    if [[ "${NTSD_RUNTIME:-arm64}" == arm64 ]]; then
+        python3 "$ROOT/tools/verify_bundle.py" "$APP"
+    else
+        python3 "$ROOT/tools/verify_intel_bundle.py" "$APP"
+    fi
+else
+    SIGN_IDENTITY="$IDENTITY" NO_DMG=1 "$ROOT/build.sh" "${ARGS[@]+"${ARGS[@]}"}"
+fi
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
 DMG="$OUTPUT/NTSD-${VERSION}-${DMG_SUFFIX}.dmg"
@@ -66,7 +96,7 @@ xcrun stapler staple "$APP"
 step "Disk image"
 STAGE="$(mktemp -d "$OUTPUT/.dmg-stage.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
-ditto "$APP" "$STAGE/NTSD.app"
+ditto "$APP" "$STAGE/$APP_NAME"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 hdiutil create -quiet -volname "NTSD ${VERSION}" -srcfolder "$STAGE" -format ULMO "$DMG"
@@ -88,7 +118,7 @@ done
 (cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")") | tee "$DMG.sha256"
 
 EXTRA_ASSETS=()
-if [[ "${NTSD_RUNTIME:-arm64}" == arm64 ]]; then
+if [[ "${NTSD_RUNTIME:-arm64}" == arm64 || "${NTSD_RUNTIME:-arm64}" == intel ]]; then
     step "Corresponding runtime sources"
     SOURCE="$OUTPUT/NTSD-${BUILD}-runtime-sources.tar.xz"
     python3 "$ROOT/tools/package_runtime_sources.py" "${NTSD_CACHE_DIR:-$ROOT/.cache}" "$SOURCE"

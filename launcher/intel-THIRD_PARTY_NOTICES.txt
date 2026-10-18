@@ -17,3 +17,16 @@ https://gstreamer.freedesktop.org/documentation/frequently-asked-questions/licen
 
 Naruto: The Setting Dawn is a free fan game by its own authors and is not covered
 by the licenses above.
+
+Window scaling uses MinHook v1.3.4, commit
+c3fcafdc10146beb5919319d0683e44e3c30d537 (BSD-2-Clause, including HDE notices).
+Source: https://github.com/TsudaKageyu/minhook
+Unmodified source and full notices are vendored under vendor/minhook; the
+application includes licenses/MinHook-LICENSE.txt.
+
+Silent audio fallback uses DSOAL e11128250439d586483ee6598d1670ab52ab5e37
+and OpenAL Soft a70d4116118cdf6bc7ac58fe6ae7a805c7205c50, LGPL-2.1-or-later.
+The bundled licenses/audio-licenses directory contains their notices and fmt's.
+Corresponding sources and patches accompany the GitHub release; rebuild with
+ tools/build-windows-support.sh in https://github.com/wowlocal/ntsd-2.8-wine.
+Sources: https://github.com/kcat/dsoal and https://github.com/kcat/openal-soft

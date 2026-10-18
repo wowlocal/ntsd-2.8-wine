@@ -41,3 +41,9 @@ FEX. This is not a source port of the game engine.
 
 Naruto: The Setting Dawn is a free fan game by its own authors and is not covered
 by the licences above. The game is supplied separately as its original ZIP.
+
+Window scaling uses MinHook v1.3.4, commit
+c3fcafdc10146beb5919319d0683e44e3c30d537 (BSD-2-Clause, including HDE notices).
+Source: https://github.com/TsudaKageyu/minhook
+Unmodified source and full notices are vendored under vendor/minhook; the
+application includes licenses/MinHook-LICENSE.txt.

@@ -1,4 +1,123 @@
-# ARM64 validation — 2026-10-18
+# Dual-runtime update validation — 18–19 October 2026
+
+Wrapper **2.8.3.3.6**, Apple M4 Pro / 24 GB / macOS 27.0.1 (26A434).
+FEX uses native ARM64 Wine 11.18 and the existing patched FEX translator;
+Rosetta retains Intel Wine 11.0_1. The Windows game executable is unchanged.
+
+## New gameplay and startup checks
+
+- Signed FEX app: normal native HAL and Windows DirectSound output probes all
+  return success. The app reaches the menu and starts a match.
+- A local two-human Wharf scene ran for several minutes. Movement, jump,
+  attack input and fullscreen entry/exit were exercised. Fullscreen covered
+  6016×3384 and restored the 1333×730 client.
+- An earlier signed candidate completed a Sakura-versus-Sasuke AI match to the scoreboard at
+  **00:35**: P1 lost (30 damage, 510 HP lost); computer won (510 damage,
+  30 HP lost). This tests actual combat and match completion with the display
+  DLL enabled.
+- The final display correction completed a Naruto-versus-Sasuke AI match at
+  **00:38**: P1 lost (0 damage, 550 HP lost); computer won (550 damage,
+  0 HP lost). The signed revision 6 artifact then passed an upgrade launch
+  and a fullscreen round trip with its complete menu restored.
+- A separately signed test copy replaces only audio-probe.exe with a 60-second
+  sleeping executable. The native HAL probe passes, the Windows helper times
+  out after **8.0 seconds**, silent configuration succeeds, and the original
+  game reaches its menu. This verifies the Wine-specific timeout recovery.
+  Restoring the real probe in that same prefix then passes DirectSound and
+  starts the game with normal system output again.
+- tests/audio-timeout.m also verifies successful child exit and bounded
+  termination: a 30-second child returns timeout status 124 in about 0.23 seconds
+  with a 0.15-second test deadline.
+- A fresh Rosetta prefix passes native HAL and Windows DirectSound creation,
+  buffer and playback probes. Its host process samples as X86-64 (translated).
+  GUI automation times out with both Retina settings and a separate Wine app
+  identity. Its process sample spends substantial main-thread time in macOS
+  image/color conversion; this observation does not establish the cause.
+  Later controlled traces exposed a startup stack overflow/page fault after
+  the first full-window copy. This also occurs with the scaling DLL removed
+  and with system audio restored. The software DirectSound fallback separately
+  exercises create/cooperative-level/buffer/lock/play/stop under Intel Wine
+  and exits successfully.
+  **Rosetta gameplay fails on this test host; no paired gameplay performance
+  result is claimed.** See the [recorded failed baseline](docs/PERFORMANCE.md).
+
+The final window-message correction also passed a native green-button fullscreen
+round trip, macOS left-half tiling to a 3008×3198 window, a click on Start in the
+scaled view, and restoration to the original window size with the complete mode
+selection view visible. Native geometry notifications update Wine's physical
+client while the engine keeps its logical buffers.
+
+## Shared display integration probe
+
+`tests/display-test.c` creates and controls its own test window and checks the
+packaged display DLL under each Wine runtime. It passes for **both FEX and
+Rosetta**:
+
+- Original canvas 800×438; real client resized to 1000×800.
+- Aspect-fit viewport 1000×548, centered at y=126; border pixel is black and
+  the interior pixel retains the test color.
+- Game-visible frame dimensions stay fixed while the system sees the new size.
+- Mouse position (500,400) maps to logical (400,219).
+- Fullscreen client is 6016×3384; returning restores 1000×800.
+- Both processes exit 0. The test sends messages only to its own window.
+
+Compile with i686-w64-mingw32-clang, linking ddraw, gdi32 and user32. Put the
+built ddraw.dll beside the test EXE and run through the target runtime with
+`WINEDLLOVERRIDES=ddraw=n,b`. This is an integration check, not a substitute for
+original-game gameplay testing. For the native timeout test:
+
+```sh
+xcrun clang -fobjc-arc -O2 -Wall -framework Foundation tests/audio-timeout.m -o /tmp/ntsd-audio-timeout-test
+/tmp/ntsd-audio-timeout-test
+```
+
+## Packaging scope
+
+Both build targets package the same display/audio support and have independent
+app names, game directories and Wine prefixes. Mach-O verification rejects App
+Sandbox and microphone-input entitlements. Intel host binaries require hardened
+runtime. FEX retains the provisioned vendor loader signature. No firewall,
+privacy protection or host audio driver was disabled.
+
+Both final runtime bundles also pass fresh 32-bit Winsock probes for DNS,
+outbound TCP/UDP echo and inbound TCP. Process samples verify native ARM64 for
+FEX and X86-64 translation for the Intel target. These transport probes do not
+replace original-game multiplayer acceptance.
+
+The complete original-game network match and CPU exception regressions below
+were performed on wrapper 2.8.3.3.4. They are retained as prior evidence, rather
+than presented as rerun gameplay tests for this update. New frame measurements
+and their limitations are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+## Revision 6 distribution validation
+
+Both apps and DMGs are Developer ID signed, notarized **Accepted**, stapled,
+and pass deep/strict signature and stapling validation. Gatekeeper reports
+**accepted**, source **Notarized Developer ID**, for all four artifacts.
+
+| Build | App notarization ID | DMG notarization ID |
+| --- | --- | --- |
+| FEX | `e569b8ba-7ade-4d2d-be7c-82c06ebba93e` | `e81fbd46-49b8-432a-8b2d-c54ca423d8be` |
+| Rosetta | `0340b785-992d-41ae-bf1f-488b6f3d5bc0` | `eeeac3d6-0d7a-41e6-822d-396c2c5fd832` |
+
+Each final disk image was mounted read-only. Its app matches the signed source
+CDHash, contains no test environment override, and preserves NTSD.exe SHA-256
+`5eda51440039099069d041e5bd13fde8be9fd8c7b20983985b1712a59719d86b`.
+The FEX image verifies 131 ARM64-capable host files with no Intel-only host;
+the Rosetta image verifies 119 hardened host files and a universal launcher.
+
+Post-stapling DMG SHA-256:
+
+- FEX: `4e0fd356c66a9155b86ed46578f617fa76e06c31d8b43f8d0ac162c25dcbcdea`.
+- Rosetta: `702cbe9a3a89f95f281d9eded43ce1bc977b801748d2b5b4941795a314ed0fea`.
+
+Notarization validates distribution signatures; the Rosetta gameplay failure
+on this host remains recorded above. Earlier private revision 5 candidates are
+not the published artifacts and their receipts are not used for revision 6.
+
+---
+
+# Previous release: ARM64 validation — 2026-10-18
 
 **Playable ARM64 preview: NTSD 2.8.3.3, wrapper 2.8.3.3.4.**
 Tested on Apple Silicon (M4 Pro), macOS 27.0.1 (26A434).
