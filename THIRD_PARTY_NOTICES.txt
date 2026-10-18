@@ -15,9 +15,26 @@ Components include Wine (LGPL-2.1-or-later), FEX (MIT), GStreamer and FFmpeg
 (LGPL), and the graphics libraries and dependencies listed in those notices.
 Hadron's own code is BSD-3-Clause (runtime/licenses/hadron/LICENSE.hadron).
 
-NTSD's launcher/hadron-paths.patch relocates Hadron's log and GStreamer-cache
-directories into this app's private support directory. Runtime machine code,
-the Wine loader's signature and provisioning profile remain unmodified.
+NTSD's launcher/hadron-paths.patch relocates logs and caches, adds the game's
+Local Network description, and forwards named audio settings. The original
+Wine loader's signature and provisioning profile remain unmodified.
+
+The WoW64 FEX translator and macOS companion are rebuilt from FEX commit
+741e146fdf5a89517e1a67e3c899907cfba6131a (MIT), with the included Hadron
+and NTSD patches. Source: https://github.com/FEX-Emu/FEX
+The original vendor ARM64EC translator remains in use.
+
+Silent audio fallback uses DSOAL (LGPL-2.1-or-later), commit
+e11128250439d586483ee6598d1670ab52ab5e37, with the included downstream patch,
+and OpenAL Soft (LGPL-2.1-or-later), commit
+a70d4116118cdf6bc7ac58fe6ae7a805c7205c50, with its null backend.
+Sources: https://github.com/kcat/dsoal and https://github.com/kcat/openal-soft
+Their copyright/licence texts, including the bundled fmt licence, accompany
+the application. tools/build-runtime-fixes.sh supplies the pinned rebuild steps.
+LLVM-mingw 20260922 supplies statically linked libc++, compiler-rt and MinGW-w64
+components covered by the notices already present in Hadron's runtime licences.
+The wrapper's patches and helper sources are available in this repository:
+https://github.com/wowlocal/ntsd-2.8-wine
 
 The native host runtime translates the original game's x86 instructions with
 FEX. This is not a source port of the game engine.

@@ -1,0 +1,3 @@
+# Patch payloads and vendored licence texts retain their original whitespace.
+patches/** -whitespace
+*.patch -whitespace

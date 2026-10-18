@@ -1,0 +1,35 @@
+From: NTSD compatibility build
+Subject: Windows: use instruction validation without page traps in full SMC mode
+
+Full SMC mode validates each guest instruction in Core.cpp. Applying the
+page-write traps as well changes guest-visible VirtualQuery/VirtualProtect
+results, although the application has not changed its requested permissions.
+Keep page trapping for mtrack; retain full instruction validation in full mode.
+
+Also remove an interval from the writable/executable set when a caller changes
+it to executable/read-only. Otherwise a later write fault can incorrectly be
+treated as an internal SMC trap rather than a real guest protection violation.
+
+This patch is maintained downstream for the NTSD runtime, not submitted to FEX.
+
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -15,7 +15,7 @@
+   : CTX {CTX}
+   , Threads {Threads} {
+   FEX_CONFIG_OPT(SMCChecks, SMCCHECKS);
+-  SMCDetectionDisabled = (SMCChecks == FEXCore::Config::CONFIG_SMC_NONE);
++  SMCDetectionDisabled = (SMCChecks != FEXCore::Config::CONFIG_SMC_MTRACK);
+ 
+   MEMORY_BASIC_INFORMATION Info;
+   uint64_t Address = 0;
+@@ -64,6 +64,8 @@
+       if (EffectiveRWX) {
+         LogMan::Msg::DFmt("Add SMC interval: {:X} - {:X}", AlignedBase, AlignedBase + AlignedSize);
+         RWXIntervals.Insert(ProtInterval);
++      } else {
++        RWXIntervals.Remove(ProtInterval);
+       }
+       if (DEPDisabled && !HasExec) {
+         DEPPromotedIntervals.Insert(ProtInterval);

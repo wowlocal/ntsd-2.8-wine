@@ -1,6 +1,6 @@
 --- a/scripts/paths.sh
 +++ b/scripts/paths.sh
-@@ -14,7 +14,7 @@
+@@ -12,7 +12,7 @@
      HADRON_PREFIX="$ROOT/prefix/release"
      HADRON_OVERLAY_HELPER="$ROOT/build/notproton/overlay-shim.dylib"
  else
@@ -11,7 +11,7 @@
      HADRON_OVERLAY_HELPER="$ROOT/steam/overlay-shim.dylib"
 --- a/scripts/play
 +++ b/scripts/play
-@@ -172,6 +172,8 @@
+@@ -176,12 +176,14 @@
      <string>1</string>
      <key>NSPrincipalClass</key>
      <string>WineApplication</string>
@@ -20,7 +20,23 @@
      <key>LSApplicationCategoryType</key>
      <string>public.app-category.games</string>
      <key>LSSupportsGameMode</key>
-@@ -229,8 +229,8 @@
+     <true/>
+     <key>LSUIElement</key>
+     <true/>
+ </dict>
+ </plist>
+ EOF
+@@ -200,7 +202,7 @@
+ else
+     set -- "$wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
+ fi
+-for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX|MESA)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
++for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX|MESA|ALSOFT|DSOAL)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
+     case "$var" in
+         WINEPREFIX|WINELOADER|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|WINE_MAC_OPENGL|MESA_LOADER_DRIVER_OVERRIDE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
+         VKD3D_SHADER_CACHE_PATH) [ -n "${vkd3d_cache:-}" ] && continue ;;
+@@ -230,10 +232,10 @@
+ # builds never take each other's.
  gst="$ROOT/dist/gstreamer"
  if [ -d "$gst/lib/gstreamer-1.0" ]; then
 -    mkdir -p "$HOME/Library/Caches/Hadron"
@@ -31,3 +47,4 @@
 +           "GST_REGISTRY_1_0=$HADRON_SUPPORT/cache/gstreamer-registry-$(cat "$ROOT/VERSION").bin" \
             ${GST_DEBUG:+"GST_DEBUG=$GST_DEBUG"} "$@"
  fi
+ # A shader Metal refuses to compile is a driver bug: KosmicKrisp saves its source here.

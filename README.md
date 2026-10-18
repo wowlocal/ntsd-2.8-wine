@@ -1,92 +1,93 @@
 # NTSD for macOS
 
-The ARM64 Wine/FEX build is **experimental**: the bundle and networking checks
-pass, but NTSD 2.8.3.3 currently fails during startup. See [TESTING.md](TESTING.md).
-The established Intel build remains the default; it requires Rosetta on Apple
-Silicon. Select `NTSD_RUNTIME=arm64` explicitly to build without Rosetta.
+A playable **Rosetta-free ARM64 preview** of NTSD 2.8.3.3 for **Apple Silicon,
+macOS 27 or later**. Download the signed, notarized app from
+[the ARM64 release](https://github.com/wowlocal/ntsd-2.8-wine/releases/tag/v2.8.3.3.4).
 
-The ARM64 target builds a self-contained `NTSD.app` for **Apple Silicon and macOS 27 or later**.
-The host runtime is native ARM64 Wine with FEX, from
-[Hadron 0.3.1](https://github.com/Broyojo/hadron/releases/tag/v0.3.1).
-It does not install or use Rosetta. The original Windows game's x86 instructions
-are translated by FEX; this is not a native source port of the game engine.
+The host runtime is ARM64 Wine/FEX, based on Hadron 0.3.1 with downstream CPU
+compatibility fixes. FEX translates the original Windows game's x86 code;
+this is not a source port of the engine. Steam, Hadron, Homebrew and Rosetta
+are not required on the player's Mac. See [TESTING.md](TESTING.md) for scope
+and [the compatibility notes](docs/ARM64_CRASH_FIX.md) for the fixes.
 
-## Build
+## Playing
+
+Open the DMG, copy NTSD to Applications, then open it. First launch copies the
+game and creates a private ARM64 Wine prefix. Existing custom controls,
+recordings and extra game files are preserved.
+
+- Player 1: WASD; J attack, K jump, L defend.
+- Player 2 on the same keyboard: arrows; comma attack, period jump, slash defend.
+- Battle menus: W/S select, J confirm. After choosing bots, the menu initially
+  selects Randomize; press W twice, then J, to start Fight.
+- Fullscreen: **⌘Return**. F1 pauses during local play.
+- Hold Option while opening the app for the game folder and Wine reset actions.
+
+Use the game's fullscreen shortcut. The macOS green-button fullscreen mode
+currently scales this legacy game's window incorrectly.
+
+Audio uses Wine's normal system output. If the native audio service does not
+respond to the bounded startup probe, the launcher selects silent software audio
+so play can continue. It restores the prefix's previous audio setting when
+returning to normal output; no host audio settings are changed.
+
+The launcher and bundled host binaries have **no App Sandbox entitlement**.
+Multiplayer is enabled. Use Online Game to host or connect to the address shown
+by the host. The game uses TCP port 12345. macOS network permissions still apply;
+the wrapper does not disable the firewall or privacy protections.
+
+## Building
+
+Requires Xcode with the macOS 27 SDK and Python 3:
 
 ```sh
-NTSD_RUNTIME=arm64 ./build.sh ~/Downloads/NTSD2.8.3.3.zip
-```
-
-Requires Xcode Command Line Tools and Python 3. Hadron is downloaded from its
-release and checked against a pinned SHA-256. Wine, FEX, graphics libraries,
-GStreamer and component licences are bundled; Hadron, Steam and Homebrew do not
-need to be installed on the player's Mac.
-
-Outputs:
-
-- `build/NTSD.app`
-- `build/NTSD-2.8.3.3-arm64-experimental-macOS.dmg` (`NO_DMG=1` skips the image)
-
-Use `NTSD_BUILD_DIR` and `NTSD_CACHE_DIR` for build outputs and downloads on
-another volume. Temporary staging stays inside the build directory. For example:
-
-```sh
-NTSD_BUILD_DIR=/Volumes/NTSD-Builds/tasks/ntsd-arm64/build \
-NTSD_CACHE_DIR=/Volumes/NTSD-Builds/tasks/ntsd-arm64/cache \
-NTSD_RUNTIME=arm64 \
 ./build.sh ~/Downloads/NTSD2.8.3.3.zip
 ```
 
-## Running
+The build verifies Hadron's download digest, downloads the pinned LLVM-mingw
+compiler, and rebuilds the patched FEX and audio libraries from pinned sources.
+CMake/Ninja are installed in a build-only Python environment when unavailable.
+Build caches and generated files are excluded from Git.
 
-First launch copies the game to `~/Library/Application Support/NTSD/Game` and
-creates a fresh `Prefix-arm64`. The previous Intel `Prefix` is left in place.
-Existing custom controls and extra game files are preserved. Player 1 defaults
-to WASD + J/K/L; player 2 uses arrows + `,` `.` `/`.
+Outputs are `build/NTSD.app` and
+`build/NTSD-2.8.3.3-arm64-experimental-macOS.dmg` (`NO_DMG=1` skips the image).
+Use `NTSD_BUILD_DIR` and `NTSD_CACHE_DIR` for another build volume.
+`NTSD_BUILD_JOBS` controls compilation parallelism (default 2).
+`NTSD_LLVM_MINGW` can name an existing LLVM-mingw 20260922 toolchain.
+`NTSD_RUNTIME=intel` explicitly selects the retained legacy Intel build.
 
-Hold Option while opening the app to open the game folder or reset ARM64 Wine.
-The main log is `~/Library/Application Support/NTSD/Logs/NTSD.log`; runtime and
-memory-watchdog logs are in `NTSD/ARM64/logs`. GStreamer caches stay under
-`NTSD/ARM64/cache`.
+## Diagnostics
 
-The launcher and Wine runtime have **no App Sandbox entitlement**. TCP/UDP
-networking and multiplayer are not disabled by the wrapper. macOS Local Network
-and firewall permissions, when requested, still apply. This does not by itself
-establish compatibility with an Internet server or another player's game.
+The default support directory is `~/Library/Application Support/NTSD`:
+`Game`, `Prefix-arm64`, `Logs/NTSD.log`, and `ARM64/logs` / `ARM64/cache`.
+The previous Intel `Prefix` is retained separately.
 
-For isolated verification, `NTSD_SUPPORT_DIR` names an absolute alternative
-support directory. `NTSD_WINEDEBUG` enables Wine diagnostics. The launcher's
-`--prepare-only` option performs first-run setup without opening the game.
-
-## Signing and notarization
-
-```sh
-NTSD_RUNTIME=arm64 ./release.sh ~/Downloads/NTSD2.8.3.3.zip
-```
-
-Uses the installed Developer ID Application identity and the Keychain profile
-`codex-notary`. Override with `CODESIGN_IDENTITY` / `NOTARY_KEYCHAIN_PROFILE`.
-It notarizes and staples the app and DMG, checks Gatekeeper for
-`Notarized Developer ID`, and writes the DMG's SHA-256 **after** stapling.
-`--publish` additionally creates a GitHub Release (a prerelease for ARM64) with
-the DMG and checksum. The ARM64 prototype is not a
-playable release; notarization verifies distribution signatures, not compatibility.
-
-Hadron's Wine loader retains its original signature and embedded provisioning
-profile for Apple's cross-architecture entitlement. Do not sign the runtime with
-`codesign --deep`, strip it, or change loader paths with `install_name_tool`.
-The build signs the outer NTSD app separately. All runtime machine code and
-component licences are retained. The recorded shell-script patch relocates
-logs/caches and adds Local Network usage text to the generated game bundle.
-
-Verify a built bundle with:
+For isolated tests, set `NTSD_SUPPORT_DIR` to an absolute directory when running
+`NTSD.app/Contents/MacOS/NTSD`. `--prepare-only` performs setup without gameplay.
+`NTSD_WINEDEBUG` enables Wine logging; `NTSD_AUDIO=auto|silent|system` selects
+the audio mode (default auto).
 
 ```sh
 python3 tools/verify_bundle.py build/NTSD.app
 ```
 
-This checks every Mach-O for an ARM64 slice, the provisioned loader, FEX,
-GStreamer ASF support, signatures, minimum OS and absence of App Sandbox.
-Runtime test results are recorded in `TESTING.md`. Use `NTSD_RUNTIME=intel` (or
-omit it) for the previous universal launcher and Intel Wine runtime; its original
-launcher, metadata and notices are retained in `launcher/intel-*`.
+This checks ARM64 host code, signatures, the provisioned loader, FEX, GStreamer
+ASF support, minimum OS and absence of App Sandbox. Component and gameplay test
+procedures are in `TESTING.md`.
+
+## Signing and releases
+
+```sh
+./release.sh ~/Downloads/NTSD2.8.3.3.zip
+```
+
+Uses the installed Developer ID identity and Keychain profile `codex-notary`.
+It notarizes and staples the app and DMG, validates both, requires Gatekeeper's
+`Notarized Developer ID` assessment, and computes the DMG checksum after stapling.
+`--publish` additionally creates a GitHub prerelease for ARM64.
+
+Hadron's restricted Wine loader keeps its original signature and provisioning
+profile. Only the rebuilt native helper, FEX companion, audio probe and outer app
+are signed with the wrapper's identity. Do not use `codesign --deep` to sign it.
+Component licences, source pins and downstream patches accompany the app;
+the release also provides the modified audio libraries' corresponding source.

@@ -1,0 +1,65 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 983e17e..8e9347a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -136,7 +136,7 @@ else()
+     endif()
+ 
+     set(DSOAL_LINK_FLAGS ${DSOAL_LINK_FLAGS} -static-libgcc -static-libstdc++)
+-    set(DSOAL_LINK_FLAGS ${DSOAL_LINK_FLAGS} "-Wl,--push-state,-Bstatic,-lstdc++,-lwinpthread,--pop-state")
++    set(DSOAL_LINK_FLAGS ${DSOAL_LINK_FLAGS} "-Wl,--push-state,-Bstatic,-lc++,-lc++abi,-lwinpthread,--pop-state")
+ endif()
+ 
+ 
+diff --git a/src/dsoal.cpp b/src/dsoal.cpp
+index 4590706..79ebd6b 100644
+--- a/src/dsoal.cpp
++++ b/src/dsoal.cpp
+@@ -331,6 +331,13 @@ HRESULT WINAPI GetDeviceID(const GUID &guidSrc, GUID &guidDst) noexcept
+     if(FAILED(hr))
+     {
+         WARN("IMMDeviceEnumerator::GetDefaultAudioEndpoint failed: {:08x}", as_unsigned(hr));
++        char drivers[16]{};
++        const auto length = GetEnvironmentVariableA("ALSOFT_DRIVERS", drivers, sizeof(drivers));
++        if(flow == eRender && length == 4 && std::string_view{drivers} == "null")
++        {
++            guidDst = ds::NoOutputGuid;
++            return DS_OK;
++        }
+         return DSERR_NODRIVER;
+     }
+ 
+diff --git a/src/dsoal.h b/src/dsoal.h
+index 0a09af5..70c13c0 100644
+--- a/src/dsoal.h
++++ b/src/dsoal.h
+@@ -35,6 +35,8 @@ constexpr auto as_unsigned(T value) noexcept
+ 
+ namespace ds {
+ 
++inline constexpr GUID NoOutputGuid{0x6a9ca158,0x8e42,0x4df7,{0x9a,0x91,0x4e,0x54,0x53,0x44,0,1}};
++
+ template<std::integral R, std::integral T> [[nodiscard]]
+ constexpr auto saturate_cast(T val) noexcept -> R
+ {
+diff --git a/src/dsoundoal.cpp b/src/dsoundoal.cpp
+index c4ce1e7..c32f094 100644
+--- a/src/dsoundoal.cpp
++++ b/src/dsoundoal.cpp
+@@ -100,6 +100,7 @@ using ALCcontextPtr = std::unique_ptr<ALCcontext, decltype([](ALCcontext *contex
+ #define PREFIX "GetSpeakerConfig "
+ std::optional<DWORD> GetSpeakerConfig(IMMDevice *device)
+ {
++    if(!device) return std::nullopt;
+     ComPtr<IPropertyStore> ps;
+     HRESULT hr{device->OpenPropertyStore(STGM_READ, ds::out_ptr(ps))};
+     if(FAILED(hr))
+@@ -196,7 +197,7 @@ ds::expected<std::unique_ptr<SharedDevice>,HRESULT> CreateDeviceShare(const GUID
+     if(drv_name.empty())
+         return ds::unexpected(DSERR_OUTOFMEMORY);
+ 
+-    ALCdevicePtr aldev{alcOpenDevice(drv_name.c_str())};
++    ALCdevicePtr aldev{alcOpenDevice(guid == ds::NoOutputGuid ? nullptr : drv_name.c_str())};
+     if(!aldev)
+     {
+         WARN("Couldn't open device \"{}\", {:#x}", drv_name, alcGetError(nullptr));

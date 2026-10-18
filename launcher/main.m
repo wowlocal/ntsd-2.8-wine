@@ -33,11 +33,12 @@ static NSString *SupportDir(void) {
     return [base stringByAppendingPathComponent:@"NTSD"];
 }
 
-static NSString *PrefixDir(void) { return [SupportDir() stringByAppendingPathComponent:@"Prefix-arm64"]; }
-static NSString *GameDir(void) { return [SupportDir() stringByAppendingPathComponent:@"Game"]; }
+static NSString *PrefixDir(void) { return [[SupportDir() stringByAppendingPathComponent:@"Prefix-arm64"] stringByResolvingSymlinksInPath]; }
+static NSString *GameDir(void) { return [[SupportDir() stringByAppendingPathComponent:@"Game"] stringByResolvingSymlinksInPath]; }
 static NSString *StampFile(void) { return [SupportDir() stringByAppendingPathComponent:@".setup-version-arm64"]; }
 static NSString *LogFile(void) { return [SupportDir() stringByAppendingPathComponent:@"Logs/NTSD.log"]; }
 static NSString *Wine(NSString *tool) { return Res([@"runtime/dist/bin" stringByAppendingPathComponent:tool]); }
+static BOOL silentAudio;
 static NSString *BuildID(void) { return NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"] ?: @"0"; }
 
 #pragma mark - State checks
@@ -68,18 +69,26 @@ static NSDictionary<NSString *, NSString *> *WineEnvironment(BOOL forSetup) {
     }
     env[@"PATH"] = @"/usr/bin:/bin:/usr/sbin:/sbin";
     NSString *gst = Res(@"runtime/dist/gstreamer");
-    env[@"HADRON_SUPPORT"] = [SupportDir() stringByAppendingPathComponent:@"ARM64"];
+    env[@"HADRON_SUPPORT"] = [[SupportDir() stringByAppendingPathComponent:@"ARM64"] stringByResolvingSymlinksInPath];
     env[@"HADRON_PROGRAM"] = @"1";
     env[@"HADRON_APP_NAME"] = @"NTSD";
     env[@"HADRON_D3D9"] = @"wined3d";
     // This small DirectDraw game needs no persistent translator cache.
     env[@"FEX_DISKCACHE"] = @"0";
+    env[@"FEX_SMCCHECKS"] = @"mtrack";
+    env[@"FEX_SILENTLOG"] = @"1";
     env[@"DYLD_FALLBACK_LIBRARY_PATH"] = Res(@"runtime/dist/ext/lib");
     env[@"WINEPREFIX"] = PrefixDir();
     env[@"WINEDEBUG"] = host[@"NTSD_WINEDEBUG"] ?: @"-all";
     env[@"MVK_CONFIG_LOG_LEVEL"] = @"0";
+    if (silentAudio) {
+        env[@"ALSOFT_DRIVERS"] = @"null";
+        env[@"ALSOFT_LOGLEVEL"] = @"1";
+        env[@"DSOAL_LOGLEVEL"] = @"1";
+    }
     env[@"WINEDLLOVERRIDES"] = forSetup ? @"mscoree,mshtml=;winemenubuilder.exe=d;winemac.drv=d"
-                                        : @"mscoree,mshtml=;winemenubuilder.exe=d";
+                                        : (silentAudio ? @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=n"
+                                                       : @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=b");
     env[@"GST_PLUGIN_SYSTEM_PATH_1_0"] = [gst stringByAppendingPathComponent:@"lib/gstreamer-1.0"];
     env[@"GST_PLUGIN_SCANNER_1_0"] = [gst stringByAppendingPathComponent:@"libexec/gstreamer-1.0/gst-plugin-scanner"];
     env[@"GST_REGISTRY_1_0"] = [SupportDir() stringByAppendingPathComponent:@"ARM64/cache/gstreamer-registry-0.3.1.bin"];
@@ -143,7 +152,9 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     NSError *error;
     if (![task launchAndReturnError:&error]) return -1;
     [task waitUntilExit];
-    return task.terminationStatus;
+    int result = task.terminationStatus;
+    [log writeData:[[NSString stringWithFormat:@"%@ exited %d\n", path.lastPathComponent, result] dataUsingEncoding:NSUTF8StringEncoding]];
+    return result;
 }
 
 #pragma mark - App
@@ -236,7 +247,7 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
         return;
     }
     if (!NeedsSetup()) {
-        [self launchAndQuit];
+        [self prepareAudioAndLaunch];
         return;
     }
     [self comeForward];
@@ -245,7 +256,7 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
         NSString *error = [self performSetup];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (error) [self fail:error];
-            else [self launchAndQuit];
+            else [self prepareAudioAndLaunch];
         });
     });
 }
@@ -279,6 +290,33 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
 
     [BuildID() writeToFile:StampFile() atomically:YES encoding:NSUTF8StringEncoding error:nil];
     return nil;
+}
+
+// Probe in a separate, time-limited process: third-party HAL drivers can hang
+// inside Apple's audio service. The private Wine prefix can then use software
+// DirectSound and a clocked silent DirectShow renderer without blocking play.
+- (void)prepareAudioAndLaunch {
+    [self comeForward];
+    [self showWindow];
+    self.statusLabel.stringValue = T(@"Проверяю звук…", @"Checking audio…");
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *mode = NSProcessInfo.processInfo.environment[@"NTSD_AUDIO"] ?: @"auto";
+        silentAudio = [mode isEqualToString:@"silent"] ||
+            (![mode isEqualToString:@"system"] && RunTool(Res(@"audio-probe"), @[], nil) != 0);
+        NSMutableDictionary *setupEnv = [WineEnvironment(NO) mutableCopy];
+        // Quartz imports DirectSound while creating its filter mapper. The
+        // fallback DLL lives beside the game, not beside this setup helper.
+        setupEnv[@"WINEDLLOVERRIDES"] = @"mscoree,mshtml=;winemenubuilder.exe=d;dsound=b";
+        int result = RunTool(Res(@"runtime/scripts/play"), @[@"ntsd-audio", Res(@"audio-config.exe"),
+                              silentAudio ? @"silent" : @"system"], setupEnv);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (result != 0) { [self fail:T(@"Не удалось настроить звук.", @"Couldn't configure audio.")]; return; }
+            self.statusLabel.stringValue = silentAudio
+                ? T(@"Звук недоступен. Запускаю без звука…", @"Audio unavailable. Starting without sound…")
+                : T(@"Запускаю игру…", @"Starting the game…");
+            [self launchAndQuit];
+        });
+    });
 }
 
 // Since macOS 14 an app can't bring itself forward unless the user launched
@@ -370,8 +408,8 @@ static int RunTool(NSString *path, NSArray<NSString *> *args, NSDictionary *env)
     [bar.widthAnchor constraintEqualToConstant:280].active = YES;
 
     NSTextField *hint = [NSTextField wrappingLabelWithString:
-        T(@"Это нужно один раз и займёт около минуты. Дальше игра будет открываться сразу.",
-          @"This happens once and takes about a minute. After that the game opens right away.")];
+        T(@"Игрок 1: WASD и J / K / L. Полный экран: ⌘Return.",
+          @"Player 1: WASD and J / K / L. Fullscreen: ⌘Return.")];
     hint.font = [NSFont systemFontOfSize:11];
     hint.textColor = NSColor.tertiaryLabelColor;
     hint.alignment = NSTextAlignmentCenter;

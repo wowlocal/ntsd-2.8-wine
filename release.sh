@@ -18,7 +18,7 @@ done
 
 PROFILE="${NOTARY_KEYCHAIN_PROFILE:-codex-notary}"
 OUTPUT="${NTSD_BUILD_DIR:-$ROOT/build}"
-case "${NTSD_RUNTIME:-intel}" in
+case "${NTSD_RUNTIME:-arm64}" in
     arm64)
         DMG_SUFFIX=arm64-experimental-macOS
         NOTES="$ROOT/RELEASE_NOTES_ARM64.md"
@@ -87,11 +87,20 @@ for receipt in "$OUTPUT/app-gatekeeper.txt" "$OUTPUT/dmg-gatekeeper.txt"; do
 done
 (cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")") | tee "$DMG.sha256"
 
+EXTRA_ASSETS=()
+if [[ "${NTSD_RUNTIME:-arm64}" == arm64 ]]; then
+    step "Corresponding runtime sources"
+    SOURCE="$OUTPUT/NTSD-${BUILD}-runtime-sources.tar.xz"
+    python3 "$ROOT/tools/package_runtime_sources.py" "${NTSD_CACHE_DIR:-$ROOT/.cache}" "$SOURCE"
+    (cd "$(dirname "$SOURCE")" && shasum -a 256 "$(basename "$SOURCE")") > "$SOURCE.sha256"
+    EXTRA_ASSETS=("$SOURCE" "$SOURCE.sha256")
+fi
+
 if [[ "$PUBLISH" == 1 ]]; then
     step "Publishing GitHub release v$BUILD"
     TITLE="NTSD $VERSION for macOS"
-    [[ "${NTSD_RUNTIME:-intel}" != arm64 ]] || TITLE="NTSD $VERSION ARM64 experimental"
-    gh release create "v$BUILD" "$DMG" "$DMG.sha256" ${PUBLISH_ARGS[@]+"${PUBLISH_ARGS[@]}"} \
+    [[ "${NTSD_RUNTIME:-arm64}" != arm64 ]] || TITLE="NTSD $VERSION ARM64 preview (Rosetta-free)"
+    gh release create "v$BUILD" "$DMG" "$DMG.sha256" ${EXTRA_ASSETS[@]+"${EXTRA_ASSETS[@]}"} ${PUBLISH_ARGS[@]+"${PUBLISH_ARGS[@]}"} \
         --title "$TITLE" --notes-file "$NOTES"
 fi
 

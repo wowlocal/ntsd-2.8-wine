@@ -1,0 +1,196 @@
+--- a/FEXCore/include/FEXCore/Core/SignalDelegator.h
++++ b/FEXCore/include/FEXCore/Core/SignalDelegator.h
+@@ -14,10 +14,12 @@
+     FAULT_SIGSEGV = SIGSEGV,
+     FAULT_SIGTRAP = SIGTRAP,
+     FAULT_SIGILL = SIGILL,
++    FAULT_SIGFPE = SIGFPE,
+ #else
+     FAULT_SIGSEGV = 11,
+     FAULT_SIGTRAP = 5,
+     FAULT_SIGILL = 4,
++    FAULT_SIGFPE = 8,
+ #endif
+   };
+ } // namespace Core
+--- a/FEXCore/Source/Interface/IR/IR.json
++++ b/FEXCore/Source/Interface/IR/IR.json
+@@ -324,6 +324,9 @@
+       "Break BreakDefinition:$Reason": {
+         "HasSideEffects": true
+       },
++      "BreakIf GPR:$Condition, GPR:$FaultRIP, BreakDefinition:$Reason": {
++        "HasSideEffects": true
++      },
+       "CallbackReturn": {
+         "HasSideEffects": true
+       },
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -3715,8 +3715,19 @@
+   }
+ }
+ 
++void OpDispatchBuilder::DivideErrorIf(X86Tables::DecodedOp Op, Ref A, Ref B, CondClass Condition) {
++  auto ShouldFault=_Select(OpSize::i64Bit,OpSize::i64Bit,Condition,A,B,Constant(1),Constant(0));
++  FlushRegisterCache();
++  _BreakIf(ShouldFault,GetRelocatedPC(Op,-Op->InstSize),IR::BreakDefinition {
++    .ErrorRegister=0,
++    .Signal=Core::FAULT_SIGFPE,
++    .TrapNumber=X86State::X86_TRAPNO_DE,
++    .si_code=1,
++  });
++}
++
+ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+-  const auto GPRSize = GetGPROpSize();
++  auto GPRSize = GetGPROpSize();
+   auto Size = OpSizeFromSrc(Op);
+ 
+   // This loads the divisor. 32-bit/64-bit paths mask inside the JIT, 8/16 do not.
+@@ -3728,6 +3739,19 @@
+     return;
+   }
+ 
++  // A quotient fits in N bits exactly when the high N dividend bits are
++  // smaller than the divisor. This also rejects a zero divisor, before ARM's
++  // non-trapping UDIV can change any architectural registers.
++  auto Bits = IR::OpSizeAsBits(Size);
++  Ref High = Size == OpSize::i8Bit ? _Bfe(OpSize::i64Bit, 8, 8, LoadGPRRegister(X86State::REG_RAX)) :
++                                   LoadGPRRegister(X86State::REG_RDX);
++  Ref MaskedDivisor = Divisor;
++  if (Size != OpSize::i64Bit) {
++    High = _Bfe(OpSize::i64Bit, Bits, 0, High);
++    MaskedDivisor = _Bfe(OpSize::i64Bit, Bits, 0, Divisor);
++  }
++  DivideErrorIf(Op, High, MaskedDivisor, CondClass::UGE);
++
+   Ref Quotient = _AllocateGPR(true);
+   Ref Remainder = _AllocateGPR(true);
+ 
+@@ -3760,13 +3784,38 @@
+   // This loads the divisor
+   Ref Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+ 
+-  const auto GPRSize = GetGPROpSize();
++  auto GPRSize = GetGPROpSize();
+   auto Size = OpSizeFromSrc(Op);
+ 
+   if (Size == OpSize::i64Bit && !Is64BitMode) {
+     LogMan::Msg::EFmt("Doesn't exist in 32bit mode");
+     DecodeFailure = true;
+     return;
++  }
++
++  if (Size != OpSize::i64Bit) {
++    auto Bits = IR::OpSizeAsBits(Size);
++    Ref Dividend = _Bfe(OpSize::i64Bit, Bits, 0, LoadGPRRegister(X86State::REG_RAX));
++    if (Size == OpSize::i8Bit) {
++      Dividend = _Sbfe(OpSize::i64Bit, 16, 0, LoadGPRRegister(X86State::REG_RAX));
++    } else {
++      Dividend = _Bfi(OpSize::i64Bit, Bits, Bits, Dividend, LoadGPRRegister(X86State::REG_RDX));
++      if (Size == OpSize::i16Bit) Dividend = _Sbfe(OpSize::i64Bit, 32, 0, Dividend);
++    }
++    auto SignedDivisor = _Sbfe(OpSize::i64Bit, Bits, 0, Divisor);
++    auto DividendSign = _Sbfe(OpSize::i64Bit, 1, 63, Dividend);
++    auto DivisorSign = _Sbfe(OpSize::i64Bit, 1, 63, SignedDivisor);
++    auto Magnitude = Sub(OpSize::i64Bit, _Xor(OpSize::i64Bit, Dividend, DividendSign), DividendSign);
++    auto DivisorMagnitude = Sub(OpSize::i64Bit, _Xor(OpSize::i64Bit, SignedDivisor, DivisorSign), DivisorSign);
++    auto Negative = _Bfe(OpSize::i64Bit, 1, 63, _Xor(OpSize::i64Bit, Dividend, SignedDivisor));
++    auto LimitPlusOne = Add(OpSize::i64Bit, Constant(1ULL << (Bits - 1)), Negative);
++    auto Threshold = _Mul(OpSize::i64Bit, DivisorMagnitude, LimitPlusOne);
++    // Truncation toward zero permits the most-negative quotient, but not the
++    // corresponding positive magnitude. Products fit in 64 bits for N <= 32.
++    // The zero-divisor case gives a zero threshold and also faults here.
++    DivideErrorIf(Op, Magnitude, Threshold, CondClass::UGE);
++  } else {
++    DivideErrorIf(Op, Divisor, Constant(0), CondClass::EQ);
+   }
+ 
+   Ref Quotient = _AllocateGPR(true);
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -460,6 +460,7 @@
+   void NEGOp(OpcodeArgs);
+   void DIVOp(OpcodeArgs);
+   void IDIVOp(OpcodeArgs);
++  void DivideErrorIf(X86Tables::DecodedOp Op, Ref A, Ref B, CondClass Condition);
+   void BSFOp(OpcodeArgs);
+   void BSROp(OpcodeArgs);
+   void CMPXCHGOp(OpcodeArgs);
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -535,6 +535,7 @@
+   FEXCore::Core::DebugData* DebugData {};
+ 
+   void ResetStack();
++  void EmitGuestFault(FEXCore::IR::BreakDefinition Reason);
+   /**
+    * @name Relocations
+    * @{ */
+--- a/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
+@@ -57,17 +57,29 @@
+ }
+ 
+ DEF_OP(Break) {
+-  auto Op = IROp->C<IR::IROp_Break>();
++  EmitGuestFault(IROp->C<IR::IROp_Break>()->Reason);
++}
++
++DEF_OP(BreakIf) {
++  auto Op=IROp->C<IR::IROp_BreakIf>();
++  ARMEmitter::ForwardLabel Continue;
++  cbz(ARMEmitter::Size::i64Bit,GetReg(Op->Condition),&Continue);
++  str(GetReg(Op->FaultRIP).X(),STATE,offsetof(FEXCore::Core::CPUState,rip));
++  EmitGuestFault(Op->Reason);
++  Bind(&Continue);
++}
++
++void Arm64JITCore::EmitGuestFault(IR::BreakDefinition Reason) {
+ 
+   // First we must reset the stack
+   ResetStack();
+ 
+   Core::CpuStateFrame::SynchronousFaultDataStruct State = {
+     .FaultToTopAndGeneratedException = 1,
+-    .Signal = Op->Reason.Signal,
+-    .TrapNo = Op->Reason.TrapNumber,
+-    .si_code = Op->Reason.si_code,
+-    .err_code = Op->Reason.ErrorRegister,
++    .Signal = Reason.Signal,
++    .TrapNo = Reason.TrapNumber,
++    .si_code = Reason.si_code,
++    .err_code = Reason.ErrorRegister,
+   };
+ 
+   uint64_t Constant {};
+@@ -80,11 +92,12 @@
+     ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.GuestSignal_SynchronousFault));
+     br(TMP1);
+   } else {
+-    switch (Op->Reason.Signal) {
++    switch (Reason.Signal) {
+     case Core::FAULT_SIGILL:
+       ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.GuestSignal_SIGILL));
+       br(TMP1);
+       break;
++    case Core::FAULT_SIGFPE: // The synchronous payload carries the guest #DE fault.
+     case Core::FAULT_SIGTRAP:
+       ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.GuestSignal_SIGTRAP));
+       br(TMP1);
+--- a/Source/Windows/Common/Exception.h
++++ b/Source/Windows/Common/Exception.h
+@@ -25,6 +25,12 @@
+ 
+   switch (Fault.Signal) {
+   case FEXCore::Core::FAULT_SIGILL: Dst.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION; return Dst;
++  case FEXCore::Core::FAULT_SIGFPE:
++    if (Fault.TrapNo == FEXCore::X86State::X86_TRAPNO_DE) {
++      Dst.ExceptionCode = EXCEPTION_INT_DIVIDE_BY_ZERO;
++      return Dst;
++    }
++    break;
+   case FEXCore::Core::FAULT_SIGTRAP:
+     switch (Fault.TrapNo) {
+     case FEXCore::X86State::X86_TRAPNO_DB: Dst.ExceptionCode = EXCEPTION_SINGLE_STEP; return Dst;
